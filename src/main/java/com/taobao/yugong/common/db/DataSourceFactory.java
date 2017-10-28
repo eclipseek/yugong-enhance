@@ -36,10 +36,11 @@ public class DataSourceFactory extends AbstractYuGongLifeCycle implements YuGong
 
     public void start() {
         super.start();
-        // add by zhangyq:
+        // comment by zhangyq:
         // 参数 Function 对象的 apply 方法，在
         // compute():359, ComputingConcurrentHashMap$ComputingValueReference (com.google.common.collect)
         // 被回调，钩子原理。
+        // 参考 notebook.1
         dataSources = MigrateMap.makeComputingMap(new Function<DataSourceConfig, DataSource>() {
 
             public DataSource apply(DataSourceConfig config) {
@@ -110,7 +111,16 @@ public class DataSourceFactory extends AbstractYuGongLifeCycle implements YuGong
                 dataSource.setValidationQuery("select 1");
                 dataSource.setExceptionSorter("com.alibaba.druid.pool.vendor.MySqlExceptionSorter");
                 dataSource.setValidConnectionCheckerClassName("com.alibaba.druid.pool.vendor.MySqlValidConnectionChecker");
-            } else {
+            } else if (dbType.isSunDB()) {
+                dataSource.addConnectionProperty("useServerPrepStmts", "false");
+                dataSource.addConnectionProperty("rewriteBatchedStatements", "true");
+                dataSource.addConnectionProperty("allowMultiQueries", "true");
+                dataSource.addConnectionProperty("readOnlyPropagatesToServer", "false");
+                dataSource.setValidationQuery("select 1 from dual");
+                dataSource.setExceptionSorter("com.alibaba.druid.pool.vendor.NullExceptionSorter");
+            }
+
+            else {
                 logger.error("Unknow database type");
             }
 
