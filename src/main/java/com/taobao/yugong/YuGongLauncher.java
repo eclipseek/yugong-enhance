@@ -18,6 +18,7 @@ public class YuGongLauncher {
 
     public static void main(String[] args) throws Throwable {
         try {
+            // 1. 加载配置
             String conf = System.getProperty("yugong.conf", "classpath:yugong.properties");
             PropertiesConfiguration config = new PropertiesConfiguration();
             if (conf.startsWith(CLASSPATH_URL_PREFIX)) {
@@ -31,9 +32,10 @@ public class YuGongLauncher {
             final YuGongController controller = new YuGongController(config);
             controller.start();
             logger.info("## the YuGong is running now ......");
-            logger.info(VersionInfo.getBuildVersion());
-            Runtime.getRuntime().addShutdownHook(new Thread() {
 
+            logger.info(VersionInfo.getBuildVersion());
+
+            Runtime.getRuntime().addShutdownHook(new Thread() {
                 public void run() {
                     if (controller.isStart()) {
                         try {
@@ -47,10 +49,11 @@ public class YuGongLauncher {
                         }
                     }
                 }
-
             });
 
+            // comment by zhangyq: 基于 table 个数的 CountDownLatch 实现同步。
             controller.waitForDone();// 如果所有都完成，则进行退出
+
             Thread.sleep(3 * 1000); // 等待3s，清理上下文
             logger.info("## stop the YuGong");
             if (controller.isStart()) {
