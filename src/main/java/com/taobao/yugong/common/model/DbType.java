@@ -10,7 +10,12 @@ public enum DbType {
     /** drds DB */
     DRDS("com.mysql.jdbc.Driver"),
     /** oracle DB */
-    ORACLE("oracle.jdbc.driver.OracleDriver");
+    ORACLE("oracle.jdbc.driver.OracleDriver"),
+
+    // DADB("com.asiainfo.dadb.client.jdbc.Driver"),
+    DADB("com.ai.aif.dadb.jdbc.DadbDriver"),
+
+    SUNDB("sunje.sundb.jdbc.SundbDriver");
 
     private String driver;
 
@@ -32,6 +37,14 @@ public enum DbType {
 
     public boolean isOracle() {
         return this.equals(DbType.ORACLE);
+    }
+
+    public boolean isDADB() {
+        return this.equals(DbType.DADB);
+    }
+
+    public boolean isSunDB() {
+        return this.equals(DbType.SUNDB);
     }
 
 }

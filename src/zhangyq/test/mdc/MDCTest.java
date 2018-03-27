@@ -1,4 +1,4 @@
-package com.taobao.yugong;
+package mdc;
 
 import org.slf4j.MDC;
 
@@ -21,7 +21,7 @@ public class MDCTest  extends Thread {
         System.out.println(Thread.currentThread().getName() + " ---> " + MDC.get("username"));
     }
 
-    public static void main(String args[]) throws InterruptedException{
+    public static void main(String args[]) throws InterruptedException {
         MDCTest t1 = new MDCTest(1);
         t1.start();
         MDCTest t2 = new MDCTest(2);

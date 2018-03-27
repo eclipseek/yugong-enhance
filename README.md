@@ -1,11 +1,13 @@
-<h1>背景</h1>
+# 背景
 <p>&nbsp; &nbsp;08年左右，阿里巴巴开始尝试MySQL的相关研究，并开发了基于MySQL分库分表技术的相关产品，Cobar/TDDL(目前为阿里云DRDS产品)，解决了单机Oracle无法满足的扩展性问题，当时也掀起一股去IOE项目的浪潮，愚公这项目因此而诞生，其要解决的目标就是帮助用户完成从Oracle数据迁移到MySQL上，完成去IOE的第一步.&nbsp;</p>
-<h1>项目介绍</h1>
+
+# 项目介绍
 <p>名称: &nbsp; yugong</p>
 <p>译意: &nbsp; 愚公移山</p>
 <p>语言: &nbsp;&nbsp;纯java开发</p>
 <p>定位: &nbsp; 数据库迁移 (目前主要支持oracle -&gt; mysql/DRDS)</p>
-<h1>项目介绍</h1>
+
+# 项目过程
 <p style="box-sizing: border-box; margin-bottom: 16px; color: #333333; font-family: 'Helvetica Neue', Helvetica, 'Segoe UI', Arial, freesans, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 16px; line-height: 25.6px;">整个数据迁移过程，分为两部分：</p>
 <ol>
 <li>全量迁移</li>
@@ -19,7 +21,8 @@
 <li>进行增量复制 (可并行进行数据校验)</li>
 <li>原库停写，切到新库</li>
 </ol>
-<h1>架构</h1>
+
+# 架构
 <p><img src="http://dl2.iteye.com/upload/attachment/0115/5473/8532d838-d4b2-371b-af9f-829d4127b1b8.png" alt="" width="584" height="206" /></p>
 <p>说明:&nbsp;</p>
 <ol>
@@ -28,20 +31,26 @@
 <!--EndFragment--></li>
 <li><!--StartFragment-->&nbsp;instance分为三部分<br />a.&nbsp; <!--StartFragment-->extractor &nbsp;(从源数据库上提取数据，可分为全量/增量实现)<!--EndFragment--><br />b.&nbsp; <!--StartFragment-->translator &nbsp;(将源库上的数据按照目标库的需求进行自定义转化)<!--EndFragment--><br />c. &nbsp;applier<!--EndFragment-->&nbsp; (将数据更新到目标库，可分为全量/增量/对比的实现<!--EndFragment-->)</li>
 </ol>
-<h1>DevDesign</h1>
+
+# DevDesign
 <p>See the page for dev design: <a href="https://github.com/alibaba/yugong/wiki/DevDesign">DevDesign</a></p>
-<h1>QuickStart</h1>
+
+# QuickStart
 <p>See the page for quick start: <a href="https://github.com/alibaba/yugong/wiki/QuickStart">QuickStart</a></p>
-<h1>AdminGuide</h1>
+
+# AdminGuide
 <p>See the page for admin deploy guide: <a href="https://github.com/alibaba/yugong/wiki/AdminGuide">AdminGuide</a></p>
-<h1>Performance</h1>
+
+# Performance
 <p>See the page for yugong performance : <a href="https://github.com/alibaba/yugong/wiki/Performance">Performance</a></p>
-<h1>相关资料</h1>
+
+# 相关资料
 <ol>
 <li>yugong简单介绍ppt : &nbsp;<a href="https://github.com/alibaba/yugong/blob/master/docs/yugong_Intro.ppt?raw=true">ppt</a></li>
 <li><a href="https://www.aliyun.com/product/drds">分布式关系型数据库服务DRDS</a> (前身为阿里巴巴公司的Cobar/TDDL的演进版本, 基本原理为MySQL分库分表)</li>
 </ol>
-<h1>问题反馈</h1>
+
+# 问题反馈
 <ol>
 <li><span style="line-height: 21px;">qq交流群： 537157866</span></li>
 <li><span style="line-height: 21px;">邮件交流： jianghang115@gmail.com , zylicfc@gmail.com</span></li>

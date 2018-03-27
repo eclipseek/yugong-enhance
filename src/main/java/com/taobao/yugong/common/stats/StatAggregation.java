@@ -6,164 +6,164 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Í³¼ÆÃ¿¸öÅú´ÎµÄÔËĞĞĞÅÏ¢
- * 
- * @author agapple 2014Äê2ÔÂ25ÈÕ ÏÂÎç11:38:06
+ * ç»Ÿè®¡æ¯ä¸ªæ‰¹æ¬¡çš„è¿è¡Œä¿¡æ¯
+ *
+ * @author agapple 2014å¹´2æœˆ25æ—¥ ä¸‹åˆ11:38:06
  * @since 1.0.0
  */
 public class StatAggregation {
 
-    private static final Logger logger           = LoggerFactory.getLogger(StatAggregation.class);
-    private static final String HISTOGRAM_FORMAT = "{×Ü¼ÇÂ¼Êı:%s,²ÉÑù¼ÇÂ¼Êı:%s,Í¬²½TPS:%s,×î³¤Ê±¼ä:%s,×îĞ¡Ê±¼ä:%s,Æ½¾ùÊ±¼ä:%s}";
-    private int                 bufferSize       = 16 * 1024;
-    private int                 indexMask;
-    private AggregationItem[]   table;
-    private AtomicLong          sequence         = new AtomicLong(-1);
-    private AtomicLong          total            = new AtomicLong(0);
-    private int                 printInterval;                                                           // ´òÓ¡ÆµÂÊ
+  private static final Logger logger           = LoggerFactory.getLogger(StatAggregation.class);
+  private static final String HISTOGRAM_FORMAT = "{æ€»è®°å½•æ•°:%s,é‡‡æ ·è®°å½•æ•°:%s,åŒæ­¥TPS:%s,æœ€é•¿æ—¶é—´:%s,æœ€å°æ—¶é—´:%s,å¹³å‡æ—¶é—´:%s}";
+  private int                 bufferSize       = 16 * 1024;
+  private int                 indexMask;
+  private AggregationItem[]   table;
+  private AtomicLong          sequence         = new AtomicLong(-1);
+  private AtomicLong          total            = new AtomicLong(0);
+  private int                 printInterval;                                                           // æ‰“å°é¢‘ç‡
 
-    public StatAggregation(int bufferSize, int printInterval){
-        if (Integer.bitCount(bufferSize) != 1) {
-            throw new IllegalArgumentException("bufferSize must be a power of 2");
-        }
-        this.bufferSize = bufferSize;
-        this.printInterval = printInterval;
-        indexMask = this.bufferSize - 1;
-        table = new AggregationItem[this.bufferSize];
+  public StatAggregation(int bufferSize, int printInterval){
+    if (Integer.bitCount(bufferSize) != 1) {
+      throw new IllegalArgumentException("bufferSize must be a power of 2");
+    }
+    this.bufferSize = bufferSize;
+    this.printInterval = printInterval;
+    indexMask = this.bufferSize - 1;
+    table = new AggregationItem[this.bufferSize];
+  }
+
+  public void push(AggregationItem aggregation) {
+    long seq = sequence.incrementAndGet();
+    table[getIndex(seq)] = aggregation;
+    total.addAndGet(aggregation.getSize());
+
+    if ((seq + 1) % printInterval == 0) { // è¾¾åˆ°æŒ‡å®šçš„è¾“å‡ºé¢‘ç‡
+      printInterval(true);
+    }
+  }
+
+  public void print() {
+    printInterval(false);
+  }
+
+  public void printInterval(boolean isInterval) {
+    String message = histogram(isInterval);
+    logger.info("{}", message);
+  }
+
+  /**
+   * è¿”å›å½“å‰stageå¤„ç†æ¬¡æ•°
+   */
+  public Long count() {
+    return sequence.get();
+  }
+
+  /**
+   * å¹³å‡å¤„ç†æ—¶é—´
+   */
+  public String histogram(boolean isInterval) {
+    Long costs = 0L;
+    Long items = 0L;
+    Long max = 0L;
+    Long min = Long.MAX_VALUE;
+    Long avg = 0L;
+    Long numbers = 0L;
+    Long tps = 0L;
+    long end = 0;
+    if (isInterval) {
+      end = sequence.get() - printInterval + 1;
+    } else {
+      end = sequence.get() - bufferSize + 1;
     }
 
-    public void push(AggregationItem aggregation) {
-        long seq = sequence.incrementAndGet();
-        table[getIndex(seq)] = aggregation;
-        total.addAndGet(aggregation.getSize());
-
-        if ((seq + 1) % printInterval == 0) { // ´ïµ½Ö¸¶¨µÄÊä³öÆµÂÊ
-            printInterval(true);
+    if (end < 0) {
+      end = 0;
+    }
+    for (long i = sequence.get(); i >= end; i--) {
+      AggregationItem aggregation = table[getIndex(i)];
+      if (aggregation != null) {
+        Long cost = aggregation.getEndMillSeconds() - aggregation.getStartMillSeconds();
+        items += 1;
+        costs += cost;
+        if (cost > max) {
+          max = cost;
         }
+        if (cost < min) {
+          min = cost;
+        }
+
+        numbers += aggregation.getSize();
+      }
     }
 
-    public void print() {
-        printInterval(false);
+    if (items != 0) {
+      avg = costs / items;
     }
 
-    public void printInterval(boolean isInterval) {
-        String message = histogram(isInterval);
-        logger.info("{}", message);
+    if (min == Long.MAX_VALUE) {
+      min = 0L;
     }
 
-    /**
-     * ·µ»Øµ±Ç°stage´¦Àí´ÎÊı
-     */
-    public Long count() {
-        return sequence.get();
+    if (costs != 0) {
+      tps = (numbers * 1000) / costs;
     }
 
-    /**
-     * Æ½¾ù´¦ÀíÊ±¼ä
-     */
-    public String histogram(boolean isInterval) {
-        Long costs = 0L;
-        Long items = 0L;
-        Long max = 0L;
-        Long min = Long.MAX_VALUE;
-        Long avg = 0L;
-        Long numbers = 0L;
-        Long tps = 0L;
-        long end = 0;
-        if (isInterval) {
-            end = sequence.get() - printInterval + 1;
-        } else {
-            end = sequence.get() - bufferSize + 1;
-        }
+    if (min != Long.MIN_VALUE) {
+      return String.format(HISTOGRAM_FORMAT, new Object[] { total.get(), numbers, tps, max, min, avg });
+    } else {
+      return String.format(HISTOGRAM_FORMAT, new Object[] { total.get(), numbers, tps, max, 0, avg });
+    }
+  }
 
-        if (end < 0) {
-            end = 0;
-        }
-        for (long i = sequence.get(); i >= end; i--) {
-            AggregationItem aggregation = table[getIndex(i)];
-            if (aggregation != null) {
-                Long cost = aggregation.getEndMillSeconds() - aggregation.getStartMillSeconds();
-                items += 1;
-                costs += cost;
-                if (cost > max) {
-                    max = cost;
-                }
-                if (cost < min) {
-                    min = cost;
-                }
+  private int getIndex(long sequcnce) {
+    return (int) sequcnce & indexMask;
+  }
 
-                numbers += aggregation.getSize();
-            }
-        }
+  public static class AggregationItem {
 
-        if (items != 0) {
-            avg = costs / items;
-        }
+    private Long startMillSeconds;
+    private Long endMillSeconds;
+    private Long size;
 
-        if (min == Long.MAX_VALUE) {
-            min = 0L;
-        }
-
-        if (costs != 0) {
-            tps = (numbers * 1000) / costs;
-        }
-
-        if (min != Long.MIN_VALUE) {
-            return String.format(HISTOGRAM_FORMAT, new Object[] { total.get(), numbers, tps, max, min, avg });
-        } else {
-            return String.format(HISTOGRAM_FORMAT, new Object[] { total.get(), numbers, tps, max, 0, avg });
-        }
+    public AggregationItem(Long startMillSeconds, Long endMillSeconds, Long size){
+      this.startMillSeconds = startMillSeconds;
+      this.endMillSeconds = endMillSeconds;
+      this.size = size;
     }
 
-    private int getIndex(long sequcnce) {
-        return (int) sequcnce & indexMask;
+    public AggregationItem(Long startMillSeconds, Long endMillSeconds){
+      this.startMillSeconds = startMillSeconds;
+      this.endMillSeconds = endMillSeconds;
     }
 
-    public static class AggregationItem {
-
-        private Long startMillSeconds;
-        private Long endMillSeconds;
-        private Long size;
-
-        public AggregationItem(Long startMillSeconds, Long endMillSeconds, Long size){
-            this.startMillSeconds = startMillSeconds;
-            this.endMillSeconds = endMillSeconds;
-            this.size = size;
-        }
-
-        public AggregationItem(Long startMillSeconds, Long endMillSeconds){
-            this.startMillSeconds = startMillSeconds;
-            this.endMillSeconds = endMillSeconds;
-        }
-
-        public Long getStartMillSeconds() {
-            return startMillSeconds;
-        }
-
-        public void setStartMillSeconds(Long startMillSeconds) {
-            this.startMillSeconds = startMillSeconds;
-        }
-
-        public Long getEndMillSeconds() {
-            return endMillSeconds;
-        }
-
-        public void setEndMillSeconds(Long endMillSeconds) {
-            this.endMillSeconds = endMillSeconds;
-        }
-
-        public Long getSize() {
-            return size;
-        }
-
-        public void setSize(Long size) {
-            this.size = size;
-        }
-
+    public Long getStartMillSeconds() {
+      return startMillSeconds;
     }
 
-    public void setPrintInterval(int printInterval) {
-        this.printInterval = printInterval;
+    public void setStartMillSeconds(Long startMillSeconds) {
+      this.startMillSeconds = startMillSeconds;
     }
+
+    public Long getEndMillSeconds() {
+      return endMillSeconds;
+    }
+
+    public void setEndMillSeconds(Long endMillSeconds) {
+      this.endMillSeconds = endMillSeconds;
+    }
+
+    public Long getSize() {
+      return size;
+    }
+
+    public void setSize(Long size) {
+      this.size = size;
+    }
+
+  }
+
+  public void setPrintInterval(int printInterval) {
+    this.printInterval = printInterval;
+  }
 
 }

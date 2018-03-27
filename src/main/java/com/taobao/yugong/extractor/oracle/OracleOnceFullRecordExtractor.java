@@ -3,6 +3,7 @@ package com.taobao.yugong.extractor.oracle;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,7 +34,7 @@ import com.taobao.yugong.exception.YuGongException;
  */
 public class OracleOnceFullRecordExtractor extends AbstractOracleRecordExtractor {
 
-    private static final String         FORMAT          = "select /*+parallel(t)*/ {0} from {1}.{2} t";
+    private static final String         FORMAT          = "select /*+parallel(t)*/ {0},t.rowid from {1}.{2} t";
     private String                      extractSql;
     private LinkedBlockingQueue<Record> queue;
     private Thread                      extractorThread = null;
@@ -56,7 +57,7 @@ public class OracleOnceFullRecordExtractor extends AbstractOracleRecordExtractor
 
         // 启动异步线程
         extractorThread = new NamedThreadFactory(this.getClass().getSimpleName() + "-"
-                                                 + context.getTableMeta().getFullName()).newThread(new ContinueExtractor(context));
+                         + context.getTableMeta().getFullName()).newThread(new ContinueExtractor(context));
         extractorThread.start();
 
         queue = new LinkedBlockingQueue<Record>(context.getOnceCrawNum() * 2);
@@ -113,6 +114,13 @@ public class OracleOnceFullRecordExtractor extends AbstractOracleRecordExtractor
         }
 
         public void run() {
+
+          // 如果只是同步表结构，该线程（执行数据抽取）不用启动。
+          if(context.isOnlyStruct()) {
+            logger.warn("Only sync table struct, exit data extrator.");
+            setStatus(ExtractStatus.TABLE_END);
+            return;
+          }
             jdbcTemplate.execute(new StatementCallback() {
 
                 public Object doInStatement(Statement stmt) throws SQLException, DataAccessException {
@@ -130,6 +138,13 @@ public class OracleOnceFullRecordExtractor extends AbstractOracleRecordExtractor
 
                         for (ColumnMeta col : context.getTableMeta().getColumns()) {
                             ColumnValue cv = getColumnValue(rs, context.getSourceEncoding(), col);
+                            cms.add(cv);
+                        }
+
+                        if (pks.size() == 0 && context.isAddPrimaryKey()) {
+                            ColumnMeta col = new ColumnMeta("ROWID", Types.VARCHAR);
+                            ColumnValue cv = getColumnValue(rs, context.getSourceEncoding(), col);
+                            String rowid = (String)cv.getValue();
                             cms.add(cv);
                         }
 

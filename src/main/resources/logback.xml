@@ -3,7 +3,7 @@
 	<appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
 		<filter class="com.taobao.yugong.common.utils.ConsoleFilter" />
 		<encoder>
-			<pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{56} - %msg%n
+			<pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{56}-%L - %msg%n
 			</pattern>
 		</encoder>
 	</appender>
@@ -15,11 +15,11 @@
 		</discriminator>
 		<sift>
 			<appender name="FILE-${table}" class="ch.qos.logback.core.rolling.RollingFileAppender">
-				<File>./yugong-master/logs/${table}/table.log</File>
+				<File>./yugong-enhance/logs/${table}/table.log</File>
 				<rollingPolicy
 					class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
 					<!-- rollover daily -->
-					<fileNamePattern>./yugong-master/logs/${table}/%d{yyyy-MM-dd}/table-%d{yyyy-MM-dd}-%i.log.gz</fileNamePattern>
+					<fileNamePattern>./yugong-enhance/logs/${table}/%d{yyyy-MM-dd}/table-%d{yyyy-MM-dd}-%i.log.gz</fileNamePattern>
 					<timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
 						<!-- or whenever the file size reaches 100MB -->
 						<maxFileSize>512MB</maxFileSize>
@@ -42,11 +42,11 @@
 		</discriminator>
 		<sift>
 			<appender name="EXTRACTOR_LOG_${table}" class="ch.qos.logback.core.rolling.RollingFileAppender">
-				<File>./yugong-master/logs/${table}/extractor.log</File>
+				<File>./yugong-enhance/logs/${table}/extractor.log</File>
 				<rollingPolicy
 					class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
 					<!-- rollover daily -->
-					<fileNamePattern>./yugong-master/logs/${table}/%d{yyyy-MM-dd}/extractor-%d{yyyy-MM-dd}-%i.log.gz</fileNamePattern>
+					<fileNamePattern>./yugong-enhance/logs/${table}/%d{yyyy-MM-dd}/extractor-%d{yyyy-MM-dd}-%i.log.gz</fileNamePattern>
 					<timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
 						<maxFileSize>512MB</maxFileSize>
 					</timeBasedFileNamingAndTriggeringPolicy>
@@ -66,11 +66,11 @@
 		</discriminator>
 		<sift>
 			<appender name="APPLIER_LOG_${table}" class="ch.qos.logback.core.rolling.RollingFileAppender">
-				<File>./yugong-master/logs/${table}/applier.log</File>
+				<File>./yugong-enhance/logs/${table}/applier.log</File>
 				<rollingPolicy
 					class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
 					<!-- rollover daily -->
-					<fileNamePattern>./yugong-master/logs/${table}/%d{yyyy-MM-dd}/applier-%d{yyyy-MM-dd}-%i.log.gz</fileNamePattern>
+					<fileNamePattern>./yugong-enhance/logs/${table}/%d{yyyy-MM-dd}/applier-%d{yyyy-MM-dd}-%i.log.gz</fileNamePattern>
 					<timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
 						<maxFileSize>512MB</maxFileSize>
 					</timeBasedFileNamingAndTriggeringPolicy>
@@ -90,11 +90,11 @@
 		</discriminator>
 		<sift>
 			<appender name="CHECK_LOG_${table}" class="ch.qos.logback.core.rolling.RollingFileAppender">
-				<File>./yugong-master/logs/${table}/check.log</File>
+				<File>./yugong-enhance/logs/${table}/check.log</File>
 				<rollingPolicy
 					class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
 					<!-- rollover daily -->
-					<fileNamePattern>./yugong-master/logs/${table}/%d{yyyy-MM-dd}/check-%d{yyyy-MM-dd}-%i.log.gz</fileNamePattern>
+					<fileNamePattern>./yugong-enhance/logs/${table}/%d{yyyy-MM-dd}/check-%d{yyyy-MM-dd}-%i.log.gz</fileNamePattern>
 					<timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
 						<maxFileSize>512MB</maxFileSize>
 					</timeBasedFileNamingAndTriggeringPolicy>
@@ -108,17 +108,17 @@
 	</appender>
 	
 	<logger name="extractor" additivity="false">  
-        <level value="INFO" />
+        <level value="WARN" />
         <appender-ref ref="EXTRACTOR_LOG" />
     </logger>
     
     <logger name="applier" additivity="false">  
-        <level value="INFO" />
+        <level value="WARN" />
         <appender-ref ref="APPLIER_LOG" />
     </logger>
     
     <logger name="check" additivity="false">  
-        <level value="INFO" />
+        <level value="WARN" />
         <appender-ref ref="CHECK_LOG" />
     </logger>
 	

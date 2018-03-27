@@ -13,6 +13,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import oracle.sql.ROWID;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.MDC;
 import org.springframework.dao.DataAccessException;
@@ -185,7 +186,17 @@ public class OracleMaterializedIncRecordExtractor extends AbstractOracleRecordEx
                         }
                     }
 
+                    if(primaryKeys.isEmpty() && context.isAddPrimaryKey()) {
+                        ColumnMeta column = new ColumnMeta("M_ROW$$", Types.VARCHAR);   // 主键name 设置成 M_ROW$$，是获取从 物化视图日志表获取记录。
+                        ColumnValue pk = getColumnValue(rs, context.getSourceEncoding(), column);
+                        pk.getColumn().setName("ROWID");                                 //
+                        column.setName("ROWID");                                         // 主键值设置成 ROWID，是因为要从 master 表反查记录，因为没有主键，反查使用 ROWID.
+                        primaryKeys.add(pk);
+                    }
+
+                    // stinson: 支持 rowid 类型物化视图的增量刷新
                     ColumnValue rowId = new ColumnValue(rowidColumn, rs.getObject("rowid"));
+                    //ColumnValue rowId = new ColumnValue(rowidColumn, rs.getObject("M_ROW$$"));
                     OracleIncrementRecord record = new OracleIncrementRecord(context.getTableMeta().getSchema(),
                         context.getTableMeta().getName(),
                         primaryKeys,
@@ -258,12 +269,18 @@ public class OracleMaterializedIncRecordExtractor extends AbstractOracleRecordEx
                         i++;
                     }
 
+                    // stinson: 没有主键，用 rowid
+                    //if (i == 1) {
+                    //    Object value = record.getRowId().getValue();
+                    //    ps.setObject(1, value);
+                    //}
+
                     try {
                         ResultSet rs = ps.executeQuery();
                         // 一条日志对应一条主表记录
                         List<ColumnValue> columns = new ArrayList<ColumnValue>();
                         boolean exist = false;
-                        if (rs.next()) {
+                        if (rs.next()) {        // 一对一，所以不用 while(rs.next())
                             exist = true;
                             // 反查获取到完整行记录
                             for (ColumnMeta col : context.getTableMeta().getColumns()) {
@@ -312,6 +329,8 @@ public class OracleMaterializedIncRecordExtractor extends AbstractOracleRecordEx
                     for (ColumnValue col : record.getPrimaryKeys()) {
                         primaryMetas.add(col.getColumn());
                     }
+                    // stinson:这里将主键拼接到查询条件中：where primarykey = xxx.
+                    // 如果没有主键，从同步表结构开始，就加入 oracle 的 rowid 到mysql 表中，后续把该 rowid 当做主键使用。
                     String priStr = SqlTemplates.COMMON.makeWhere(primaryMetas);
                     applierSql = new MessageFormat(MASTER_MULTI_PK_FORMAT).format(new Object[] { colstr,
                             record.getSchemaName(), record.getTableName(), priStr });

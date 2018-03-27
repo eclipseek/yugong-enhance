@@ -118,6 +118,14 @@ public class DataSourceFactory extends AbstractYuGongLifeCycle implements YuGong
                 dataSource.addConnectionProperty("readOnlyPropagatesToServer", "false");
                 dataSource.setValidationQuery("select 1 from dual");
                 dataSource.setExceptionSorter("com.alibaba.druid.pool.vendor.NullExceptionSorter");
+            } else if (dbType.isDADB()) {
+              dataSource.addConnectionProperty("useServerPrepStmts", "false");
+              dataSource.addConnectionProperty("rewriteBatchedStatements", "true");
+              dataSource.addConnectionProperty("allowMultiQueries", "true");
+              dataSource.addConnectionProperty("readOnlyPropagatesToServer", "false");
+              dataSource.setValidationQuery("select 1");
+              dataSource.setExceptionSorter("com.alibaba.druid.pool.vendor.MySqlExceptionSorter");
+              dataSource.setValidConnectionCheckerClassName("com.alibaba.druid.pool.vendor.MySqlValidConnectionChecker");
             }
 
             else {

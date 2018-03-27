@@ -5,11 +5,12 @@ import java.util.concurrent.ConcurrentMap;
 import com.google.common.base.Function;
 
 /*
-* add by zhangyq:
+* comment by zhangyq:
 * 用到了 google 的 guava.
 * 关于 guava，参考：
 * http://ifeve.com/google-guava/
 * http://www.cnblogs.com/snidget/archive/2013/02/05/2893344.html
+*
 * */
 public class MigrateMap {
 

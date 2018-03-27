@@ -1,17 +1,5 @@
 package com.taobao.yugong.applier;
 
-import java.sql.*;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataAccessException;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.PreparedStatementCallback;
-
 import com.google.common.base.Function;
 import com.google.common.collect.Lists;
 import com.google.common.collect.MigrateMap;
@@ -24,8 +12,22 @@ import com.taobao.yugong.common.model.YuGongContext;
 import com.taobao.yugong.common.model.record.Record;
 import com.taobao.yugong.common.utils.YuGongUtils;
 import com.taobao.yugong.exception.YuGongException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementCallback;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.DefaultTransactionDefinition;
 
-import javax.sql.DataSource;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 全量同步appiler
@@ -46,14 +48,6 @@ public class FullRecordApplier extends AbstractRecordApplier {
 
     public FullRecordApplier(YuGongContext context){
         this.context = context;
-        if(context.getDadbContext() != null) {
-            try {
-                Class.forName(context.getDadbContext().getDriver());
-                System.out.println(Thread.currentThread().getName() + " ---> driver loaded...");
-            } catch (ClassNotFoundException e) {
-                e.printStackTrace();
-            }
-        }
     }
 
     public void start() {
@@ -78,7 +72,8 @@ public class FullRecordApplier extends AbstractRecordApplier {
         doApply(records);
     }
 
-    protected void doApplyDadb(List<Record> records) {
+
+    protected void doApply(List<Record> records) {
         Map<List<String>, List<Record>> buckets = MigrateMap.makeComputingMap(new Function<List<String>, List<Record>>() {
 
             public List<Record> apply(List<String> names) {
@@ -91,113 +86,96 @@ public class FullRecordApplier extends AbstractRecordApplier {
             buckets.get(Arrays.asList(record.getSchemaName(), record.getTableName())).add(record);
         }
 
-        try {
-            Connection conn = DriverManager.getConnection(context.getDadbContext().getUrl(),
-                    context.getDadbContext().getUser(),
-                    context.getDadbContext().getPassword());
+        JdbcTemplate jdbcTemplate = new JdbcTemplate(context.getTargetDs());
+        for (final List<Record> batchRecords : buckets.values()) {
+            TableSqlUnit sqlUnit = getSqlUnit(batchRecords.get(0));
+            if (context.isBatchApply()) {
+                if(context.isApplierWithTransaction()) {
+                    // 批量执行带事务
+                    applierByBatchWithTransaction(jdbcTemplate, batchRecords, sqlUnit);
+                } else {
+                    // 批量执行不带事务
+                    applierByBatchWithoutTransaction(jdbcTemplate, batchRecords, sqlUnit);
+                }
 
-            for (final List<Record> batchRecords : buckets.values()) {
-                TableSqlUnit sqlUnit = getSqlUnit(batchRecords.get(0));
-                PreparedStatement ps = conn.prepareStatement(sqlUnit.applierSql);
-                final Map<String, Integer> indexs = sqlUnit.applierIndexs;
-                if (context.isBatchApply()) {
+            } else {
+                if(context.isApplierWithTransaction()) {
+                    // 单个执行带事务
+                    applyOneByOneWithTransaction(jdbcTemplate, batchRecords, sqlUnit);
+                } else {
+                    // 单个执行不带事务
+                    applyOneByOneWithoutTransaction(jdbcTemplate, batchRecords, sqlUnit);
+                }
+            }
+        }
+    }
+
+
+    /**
+     * batch处理支持。带事务。
+     */
+    protected void applierByBatchWithTransaction(JdbcTemplate jdbcTemplate, final List<Record> batchRecords, TableSqlUnit sqlUnit) {
+        boolean redoOneByOne = false;
+
+        // 加入事务控制
+        DefaultTransactionDefinition def = new DefaultTransactionDefinition();
+        def.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW); //  事务隔离级别
+        final DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(
+                jdbcTemplate.getDataSource());
+        final TransactionStatus status = transactionManager.getTransaction(def);
+        transactionManager.setRollbackOnCommitFailure(true);
+
+        try {
+            final Map<String, Integer> indexs = sqlUnit.applierIndexs;
+            jdbcTemplate.execute(sqlUnit.applierSql, new PreparedStatementCallback() {
+
+                public Object doInPreparedStatement(PreparedStatement ps) throws SQLException, DataAccessException {
                     for (Record record : batchRecords) {
                         // 先加字段，后加主键
                         List<ColumnValue> cvs = record.getColumns();
                         for (ColumnValue cv : cvs) {
-                            //ps.setObject(getIndex(indexs, cv), cv.getValue(), cv.getColumn().getType());
-                            ps.setObject(getIndex(indexs, cv), cv.getValue());
+                            ps.setObject(getIndex(indexs, cv), cv.getValue(), cv.getColumn().getType());
                         }
 
                         // 添加主键
                         List<ColumnValue> pks = record.getPrimaryKeys();
+                        String pkValues = "";
                         for (ColumnValue pk : pks) {
-                            //ps.setObject(getIndex(indexs, pk), pk.getValue(), pk.getColumn().getType());
-                            ps.setObject(getIndex(indexs, pk), pk.getValue());
+                            ps.setObject(getIndex(indexs, pk), pk.getValue(), pk.getColumn().getType());
+                            pkValues += pk.getValue();
                         }
 
                         ps.addBatch();
                     }
 
-                    ps.executeBatch();
-                } else {
-                    for (Record record : records) {
-                        List<ColumnValue> pks = record.getPrimaryKeys();
-                        // 先加字段，后加主键
-                        List<ColumnValue> cvs = record.getColumns();
-                        for (ColumnValue cv : cvs) {
-                            //ps.setObject(getIndex(indexs, cv), cv.getValue(), cv.getColumn().getType());
-                            ps.setObject(getIndex(indexs, cv), cv.getValue());
-                        }
+                    int[]  ret = ps.executeBatch();
+                    transactionManager.commit(status);
 
-                        // 添加主键
-                        for (ColumnValue pk : pks) {
-                            //ps.setObject(getIndex(indexs, pk), pk.getValue(), pk.getColumn().getType());
-                            ps.setObject(getIndex(indexs, pk), pk.getValue());
-                        }
-
-
-                        try {
-                            long start = System.currentTimeMillis();
-                            ps.execute();
-                            System.out.println("Time spend of execute: " + (System.currentTimeMillis() - start));
-                        } catch (SQLException e) {
-                            if (context.isSkipApplierException()) {
-                                logger.error("skiped record data : " + record.toString(), e);
-                            } else {
-                                if (e.getMessage().contains("Duplicate entry")
-                                        || e.getMessage().startsWith("ORA-00001: 违反唯一约束条件")) {
-                                    logger.error("skiped record data ,maybe transfer before,just continue:"
-                                            + record.toString());
-                                } else {
-                                    throw new SQLException("failed Record Data : " + record.toString(), e);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            conn.close();
-            System.out.println("FullRecordApplier.doApplyDadb connection closed: " + records.size());
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-    }
-
-
-    protected void doApply(List<Record> records) {
-        if(context.getDadbContext() != null) {
-            doApplyDadb(records);
-        } else {
-            Map<List<String>, List<Record>> buckets = MigrateMap.makeComputingMap(new Function<List<String>, List<Record>>() {
-
-                public List<Record> apply(List<String> names) {
-                    return Lists.newArrayList();
+                    return ret;
                 }
             });
+        } catch (Exception e) {
+            // 批量提交失败，尝试逐个提交
+            redoOneByOne = true;
+            transactionManager.rollback(status);
+        }
 
-            // 根据目标库的不同，划分为多个bucket
-            for (Record record : records) {
-                buckets.get(Arrays.asList(record.getSchemaName(), record.getTableName())).add(record);
-            }
-
-            JdbcTemplate jdbcTemplate = new JdbcTemplate(context.getTargetDs());
-            for (final List<Record> batchRecords : buckets.values()) {
-                TableSqlUnit sqlUnit = getSqlUnit(batchRecords.get(0));
-                if (context.isBatchApply()) {
-                    applierByBatch(jdbcTemplate, batchRecords, sqlUnit);
-                } else {
-                    applyOneByOne(jdbcTemplate, batchRecords, sqlUnit);
-                }
+        // batch cannot pass the duplicate entry exception,so
+        // if executeBatch throw exception,rollback it, and
+        // redo it one by one
+        if (redoOneByOne) {
+            if (context.isApplierWithTransaction()) {
+                applyOneByOneWithTransaction(jdbcTemplate, batchRecords, sqlUnit);
+            } else {
+                applyOneByOneWithoutTransaction(jdbcTemplate, batchRecords, sqlUnit);
             }
         }
     }
 
     /**
-     * batch处理支持
+     * batch处理支持。不带事务
      */
-    protected void applierByBatch(JdbcTemplate jdbcTemplate, final List<Record> batchRecords, TableSqlUnit sqlUnit) {
+    protected void applierByBatchWithoutTransaction(JdbcTemplate jdbcTemplate, final List<Record> batchRecords, TableSqlUnit sqlUnit) {
         boolean redoOneByOne = false;
         try {
             final Map<String, Integer> indexs = sqlUnit.applierIndexs;
@@ -234,53 +212,93 @@ public class FullRecordApplier extends AbstractRecordApplier {
         // if executeBatch throw exception,rollback it, and
         // redo it one by one
         if (redoOneByOne) {
-            applyOneByOne(jdbcTemplate, batchRecords, sqlUnit);
+            if (context.isApplierWithTransaction()) {
+                applyOneByOneWithTransaction(jdbcTemplate, batchRecords, sqlUnit);
+            } else {
+                applyOneByOneWithoutTransaction(jdbcTemplate, batchRecords, sqlUnit);
+            }
         }
     }
 
     /**
-     * 一条条记录串行处理
+     * 一条条记录串行处理。不带事务。
      */
-    protected void applyOneByOne(JdbcTemplate jdbcTemplate, final List<Record> records, TableSqlUnit sqlUnit) {
+    protected void applyOneByOneWithoutTransaction(JdbcTemplate jdbcTemplate, final List<Record> records, TableSqlUnit sqlUnit) {
         final Map<String, Integer> indexs = sqlUnit.applierIndexs;
         jdbcTemplate.execute(sqlUnit.applierSql, new PreparedStatementCallback() {
 
             public Object doInPreparedStatement(PreparedStatement ps) throws SQLException, DataAccessException {
                 for (Record record : records) {
-                    List<ColumnValue> pks = record.getPrimaryKeys();
-                    // 先加字段，后加主键
-                    List<ColumnValue> cvs = record.getColumns();
-                    for (ColumnValue cv : cvs) {
-                        ps.setObject(getIndex(indexs, cv), cv.getValue(), cv.getColumn().getType());
-                    }
-
-                    // 添加主键
-                    for (ColumnValue pk : pks) {
-                        ps.setObject(getIndex(indexs, pk), pk.getValue(), pk.getColumn().getType());
-                    }
-
+                    setPrepareStatement(ps, record, indexs);
                     try {
                         ps.execute();
                     } catch (SQLException e) {
-                        if (context.isSkipApplierException()) {
-                            logger.error("skiped record data : " + record.toString(), e);
-                        } else {
-                            if (e.getMessage().contains("Duplicate entry")
-                                || e.getMessage().startsWith("ORA-00001: 违反唯一约束条件")) {
-                                logger.error("skiped record data ,maybe transfer before,just continue:"
-                                             + record.toString());
-                            } else {
-                                throw new SQLException("failed Record Data : " + record.toString(), e);
-                            }
-                        }
+                        handleException(e, record);
                     }
                 }
-
                 return null;
             }
-
         });
 
+    }
+
+
+    /**
+     * 一条条记录串行处理。 带事务。
+     */
+    protected void applyOneByOneWithTransaction(JdbcTemplate jdbcTemplate, final List<Record> records, TableSqlUnit sqlUnit) {
+        final Map<String, Integer> indexs = sqlUnit.applierIndexs;
+        for (final Record record : records) {
+            // 加入事务控制
+            final DefaultTransactionDefinition def = new DefaultTransactionDefinition();
+            def.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW); //  事务隔离级别
+            final DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(jdbcTemplate.getDataSource());
+            final TransactionStatus status = transactionManager.getTransaction(def);
+            transactionManager.setRollbackOnCommitFailure(true);
+
+            jdbcTemplate.execute(sqlUnit.applierSql, new PreparedStatementCallback() {
+                public Object doInPreparedStatement(PreparedStatement ps) throws SQLException, DataAccessException {
+                    setPrepareStatement(ps, record, indexs);
+                    try {
+                        ps.execute();
+                        transactionManager.commit(status);
+                    } catch (SQLException e) {
+                        handleException(e, record);
+                        transactionManager.rollback(status);
+                    }
+
+                    return null;
+                }
+            });
+        }
+    }
+
+    private void setPrepareStatement(PreparedStatement ps, Record record, Map<String, Integer> indexs) throws SQLException {
+        List<ColumnValue> pks = record.getPrimaryKeys();
+        // 先加字段，后加主键
+        List<ColumnValue> cvs = record.getColumns();
+        for (ColumnValue cv : cvs) {
+            ps.setObject(getIndex(indexs, cv), cv.getValue(), cv.getColumn().getType());
+        }
+
+        // 添加主键
+        for (ColumnValue pk : pks) {
+            ps.setObject(getIndex(indexs, pk), pk.getValue(), pk.getColumn().getType());
+        }
+    }
+
+    private void handleException(Exception e, Record record) throws SQLException {
+        if (context.isSkipApplierException()) {
+            logger.error("skiped record data : " + record.toString(), e);
+        } else {
+            if (e.getMessage().contains("Duplicate entry")
+                    || e.getMessage().startsWith("ORA-00001: 违反唯一约束条件")) {
+                logger.error("skiped record data ,maybe transfer before,just continue:"
+                        + record.toString());
+            } else {
+                throw new SQLException("failed Record Data : " + record.toString(), e);
+            }
+        }
     }
 
     /**
@@ -327,6 +345,11 @@ public class FullRecordApplier extends AbstractRecordApplier {
                                 meta.getName(),
                                 primaryKeys,
                                 columns);
+                        } else if (dbType == DbType.SUNDB) {
+                            applierSql = SqlTemplates.SUNDB.getInsertSql(meta.getSchema(),
+                                    meta.getName(),
+                                    primaryKeys,
+                                    columns);
                         } else {
                             applierSql = SqlTemplates.ORACLE.getInsertSql(meta.getSchema(),
                                 meta.getName(),
@@ -342,10 +365,13 @@ public class FullRecordApplier extends AbstractRecordApplier {
                         index++;
                     }
 
-                    for (String column : primaryKeys) {
-                        indexs.put(column, index);
-                        index++;
+                    if (primaryKeys.length > 0 && !primaryKeys[0].equalsIgnoreCase("rowid")) {
+                        for (String column : primaryKeys) {
+                            indexs.put(column, index);
+                            index++;
+                        }
                     }
+
                     // 检查下是否少了列
                     checkColumns(meta, indexs);
 

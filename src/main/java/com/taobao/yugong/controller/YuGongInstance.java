@@ -1,10 +1,13 @@
 package com.taobao.yugong.controller;
 
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.taobao.yugong.applier.FullRecordApplier;
@@ -41,27 +44,33 @@ import com.taobao.yugong.translator.BackTableDataTranslator;
 import com.taobao.yugong.translator.DataTranslator;
 import com.taobao.yugong.translator.core.EncodeDataTranslator;
 import com.taobao.yugong.translator.core.OracleIncreamentDataTranslator;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementCallback;
+
+import javax.sql.DataSource;
 
 /**
  * 代表一个同步迁移任务
  *
  * @author agapple 2013-9-17 下午3:21:01
  */
-public class YuGongInstance extends AbstractYuGongLifeCycle {
+    public class YuGongInstance extends AbstractYuGongLifeCycle {
 
     private final Logger         logger          = LoggerFactory.getLogger(YuGongInstance.class);
     private YuGongContext        context;
-    private RecordExtractor      extractor;
+    private RecordExtractor      extractor;             // 依赖 RunMode 决定使用什么类型的 Extractor.
     private RecordApplier        applier;
-    private DataTranslator       translator;
+    private DataTranslator       translator;            // 如果有指定，使用指定的 TableName + DataTranslator，没有指定，使用 DefaultTranslator。
     private RecordPositioner     positioner;
-    private AlarmService         alarmService;
-    private String               alarmReceiver;
-    private TableController      tableController;
-    private ProgressTracer       progressTracer;
+    private AlarmService         alarmService;          // 全局唯一
+    private String               alarmReceiver;         // 全局唯一
+    private TableController      tableController;       // 全局唯一
+    private ProgressTracer       progressTracer;        // 全局唯一
     private StatAggregation      statAggregation;
     private DbType               targetDbType;
     private boolean              tableExist;
+    private AtomicBoolean inited = new AtomicBoolean(Boolean.FALSE);
 
     private List<DataTranslator> coreTranslators = Lists.newArrayList();
     private Thread               worker          = null;
@@ -126,9 +135,13 @@ public class YuGongInstance extends AbstractYuGongLifeCycle {
             }
 
             worker = new Thread(new Runnable() {
-
                 public void run() {
                     try {
+                        // 如果只是 mark 或 clear，只启动 extractor 就可以了。
+                        if (context.getRunMode().isMark() || context.getRunMode().isClear()) {
+                            return;
+                        }
+
                         if (context.getRunMode() != RunMode.INC) {
                             // 目前只针对inc可以做重试
                             retryTimes = 1;
@@ -214,20 +227,7 @@ public class YuGongInstance extends AbstractYuGongLifeCycle {
                             Throwable applierException = null;
                             for (int i = 0; i < retryTimes; i++) {
                                 try {
-                                    // 系统启动时，默认认为所有表都不存在
-                                    if (!tableExist) {
-                                        tableExist = applier.isTableExist(context);
-                                    }
-
-                                    // 如果表不存在，创建。
-                                    if (!tableExist && context.isAutoCreateTable()) {
-                                        tableExist = applier.createTable(context);
-                                        // 表创建成功，再创建索引
-                                        if (tableExist && context.isAutoCreateIndex()) {
-                                            applier.createIndex(context);
-                                        }
-                                    }
-
+                                    createTableIfNeeded();
                                     if (!tableExist) {
                                         throw new YuGongException("table not exist!");
                                     }
@@ -237,6 +237,7 @@ public class YuGongInstance extends AbstractYuGongLifeCycle {
                                     if (!onlyStruct) {
                                         applier.apply(records);
                                     } else {
+                                        status = ExtractStatus.TABLE_END;
                                         logger.info("record not need transfer.");
                                     }
 
@@ -295,6 +296,51 @@ public class YuGongInstance extends AbstractYuGongLifeCycle {
                     } catch (Throwable e) {
                         throw new YuGongException(e);
                     }
+                }
+
+                private void createTableIfNeeded() throws SQLException {
+                    // 只在启动时执行一次。
+                    if(inited.compareAndSet(Boolean.FALSE, Boolean.TRUE)) {
+                        // 系统启动时，默认认为所有表都不存在
+                        if (!tableExist) {
+                            // 检查表是不是存在
+                            tableExist = applier.isTableExist(context);
+                        }
+
+                        // 表存在，需要重建，先执行删除语句。
+                        if (tableExist && context.isReCreateTableOnStart()) {
+                            dropTable();
+                            tableExist = applier.isTableExist(context);;
+                        }
+
+                        // 如果表不存在，创建。
+                        if (!tableExist && context.isAutoCreateTable()) {
+                            tableExist = applier.createTable(context);
+                            // 表创建成功，再创建索引
+                            if (tableExist && context.isAutoCreateIndex()) {
+                                applier.createIndex(context);
+                            }
+                        }
+                    }
+                }
+
+                private void dropTable() throws SQLException {
+                    final String tableName = context.getTableMeta().getName();
+                    final String sql = "drop table if exists " + context.getTableMeta().getName();
+                    DataSource ds = context.getTargetDs();
+                    JdbcTemplate jdbcTemplate = new JdbcTemplate(ds);
+                    jdbcTemplate.execute(sql, new PreparedStatementCallback() {
+                        public Object doInPreparedStatement(PreparedStatement ps) throws SQLException, DataAccessException {
+                            try {
+                                ps.execute(sql);
+                                logger.info("table [{}] drop success!", tableName);
+                            } catch (SQLException e) {
+                                logger.error("table [{}] drop failed! reason: {}", tableName, e.getMessage());
+                                throw e;
+                            }
+                            return null;
+                        }
+                    });
                 }
 
                 private List<Record> processTranslator(final DataTranslator translator, List<Record> records) {

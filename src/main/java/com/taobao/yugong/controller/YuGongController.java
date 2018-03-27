@@ -2,10 +2,7 @@ package com.taobao.yugong.controller;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -87,21 +84,23 @@ public class YuGongController extends AbstractYuGongLifeCycle {
     private ThreadPoolExecutor       extractorExecutor = null;
     private ThreadPoolExecutor       applierExecutor   = null;
 
+    // add by zhangyq: todo 设计成单例。
     public YuGongController(Configuration config){
         this.config = config;
     }
 
     public void start() {
-        // zhangyq.
+        // comment by zhangyq.
         // MDC（Mapped Diagnostic Context，映射调试上下文）是 log4j 和 logback 提供的一种方便在多线程条件下记录日志的功能.
         // 在每个线程内，可保持独立的日志记录。
+        // 参考：notebook.2
         MDC.remove(YuGongConstants.MDC_TABLE_SHIT_KEY);
         super.start();
         if (!dataSourceFactory.isStart()) {
             dataSourceFactory.start();
         }
 
-        // 设置下运行模式
+        // 设置下运行模式 comment by zhangyq: FULL/ALL/INC/CHECK/CLEAR/MARK
         String mode = config.getString("yugong.table.mode");
         if (StringUtils.isEmpty(mode)) {
             throw new YuGongException("yugong.table.mode should not be empty");
@@ -198,9 +197,11 @@ public class YuGongController extends AbstractYuGongLifeCycle {
 
         logger.info("## prepare start tables[{}] with concurrent[{}]", instances.size(), threadSize);
         int progressPrintInterval = config.getInt("yugong.progress.print.interval", 1);
-        schedule = Executors.newScheduledThreadPool(2);
-        schedule.scheduleWithFixedDelay(new Runnable() {
 
+        // 创建一个定时调度线程池，里面有两个线程。
+        schedule = Executors.newScheduledThreadPool(2);
+        // 一个线程定时打印进度。
+        schedule.scheduleWithFixedDelay(new Runnable() {
             @Override
             public void run() {
                 try {
@@ -210,13 +211,15 @@ public class YuGongController extends AbstractYuGongLifeCycle {
                 }
             }
         }, progressPrintInterval, progressPrintInterval, TimeUnit.MINUTES);
-        schedule.execute(new Runnable() {
 
+        // 一个线程监控完成的 instance。
+        schedule.execute(new Runnable() {
             @Override
             public void run() {
                 while (true) {
                     try {
                         YuGongInstance instance = tableController.takeDone();
+                        // 如果还在运行中，调用 stop 将其终结。
                         if (instance.isStart()) {
                             instance.stop();
                         }
@@ -230,6 +233,7 @@ public class YuGongController extends AbstractYuGongLifeCycle {
             }
         });
 
+        // 启动所有 instance，并等待完成。
         for (YuGongInstance instance : instances) {
             instance.start();
             if (!concurrent) {
@@ -403,7 +407,6 @@ public class YuGongController extends AbstractYuGongLifeCycle {
                 file = new File(translatorDir, tableName + ".java");
                 if (!file.exists()) {
                     return getDefaultTranslator();
-                    //return null;
                 }
             }
 
@@ -423,7 +426,8 @@ public class YuGongController extends AbstractYuGongLifeCycle {
             String mode = config.getString("yugong.run.positioner", "FILE");
             if (StringUtils.equalsIgnoreCase("FILE", mode)) {
                 FileMixedRecordPositioner positioner = new FileMixedRecordPositioner();
-                positioner.setDataDir(new File("./yugong-master/positioner")); // 使用了../相对目录，启动脚本会确保user.dir为bin目录
+                //positioner.setDataDir(new File("./yugong-enhance/positioner")); // 使用了../相对目录，启动脚本会确保user.dir为bin目录
+                positioner.setDataDir(new File("../yugong-enhance/positioner")); // 使用了../相对目录，启动脚本会确保user.dir为bin目录
                 positioner.setDataFileName(tableHolder.table.getSchema() + "_" + tableHolder.table.getName() + ".dat");
                 return positioner;
             } else {
@@ -452,23 +456,12 @@ public class YuGongController extends AbstractYuGongLifeCycle {
 
         // uncomment by zhangyq: fang
         if (sourceDbType.isOracle() && runMode.isAll()) {
-            preCheckMlogGrant(context.getSourceDs());
+           preCheckMlogGrant(context.getSourceDs());
         }
 
         logger.info("check target database connection ...");
         context.setTargetDs(initDataSource("target"));
         logger.info("check target database is ok");
-
-        // zhangyq todo: 不应该单独加入 dadb 的配置，如果接入dadb，应该使用 yugong.database.target 的配置
-        String dadbFlag = config.getString("yugong.dadb.flag", "0");
-        if (dadbFlag.equals("1")) {
-            DADBContext dadbContext = new DADBContext();
-            dadbContext.setDriver(config.getString("yugong.dadb.sql.driver", "127.0.0.1"));
-            dadbContext.setUrl(config.getString("yugong.dadb.status.url", "com.aif.dadb.jdbc.Driver"));
-            dadbContext.setUser(config.getString("yugong.dadb.status.user", "root"));
-            dadbContext.setPassword(config.getString("yugong.dadb.status.password", "root"));
-            context.setDadbContext(dadbContext);
-        }
 
         context.setSourceEncoding(config.getString("yugong.database.source.encode", "UTF-8"));
         context.setTargetEncoding(config.getString("yugong.database.target.encode", "UTF-8"));
@@ -477,6 +470,9 @@ public class YuGongController extends AbstractYuGongLifeCycle {
         context.setBuildThreadNum(config.getInt("yugong.table.buildThreadNum", 5));
         context.setAutoCreateIndex(config.getBoolean("yugong.table.autoCreateIndex", false));
         context.setOnlyStruct(config.getBoolean("yugong.table.onlyStruct", false));
+        context.setAddPrimaryKey(config.getBoolean("yugong.table.add.rowid.as.primarykey", false));
+        context.setReCreateTableOnStart(config.getBoolean("yugong.table.recreate.on.start", false));
+        context.setApplierWithTransaction(config.getBoolean("yugong.applier.with.transaction", false));
         context.setAutoCreateTable(config.getBoolean("yugong.table.autoCreateTable", false));
         context.setTpsLimit(config.getInt("yugong.table.tpsLimit", 2000));
         context.setIgnoreSchema(config.getBoolean("yugong.table.ignoreSchema", true));
@@ -522,18 +518,11 @@ public class YuGongController extends AbstractYuGongLifeCycle {
             isEmpty &= StringUtils.isBlank((String) table);
         }
 
-        // 如果为空，读取所有表
-//        if(isEmpty) {
-//            DataSource ds = globalContext.getSourceDs();
-//            tableWhiteList = DatabaseMetaGenerator.getAllTableNames(ds, ((DruidDataSource)ds).getUsername());
-//            for (Object table : tableWhiteList) {
-//                isEmpty &= StringUtils.isBlank((String) table);
-//            }
-//        }
-
-        final List<TableHolder> tables = Lists.newArrayList();
+        //final List<TableHolder> tables = Lists.newArrayList();
+        final List<TableHolder> tables = new Vector();
         final DbType targetDbType = YuGongUtils.judgeDbType(globalContext.getTargetDs());
         final AtomicInteger index = new AtomicInteger(0);
+        // 指定了白名单，只同步白名单指定的表。
         if (!isEmpty) {
             logger.info("white table size: " + tableWhiteList.size());
             logger.info("white table: " + tableWhiteList);
@@ -586,7 +575,7 @@ public class YuGongController extends AbstractYuGongLifeCycle {
                                             // 根据实际表名处理一下
                                             if (!isBlackTable(table.getName(), tableBlackList)
                                                     && !isBlackTable(table.getFullName(), tableBlackList)) {
-                                                TableMetaGenerator.buildColumns(globalContext.getSourceDs(), table);
+                                                TableMetaGenerator.buildColumns(globalContext.getSourceDs(), table, targetDbType);
                                                 // 构建一下拆分条件
                                                 DataTranslator translator = buildExtKeys(table, (String) obj, targetDbType);
                                                 TableHolder holder = new TableHolder(table);
@@ -624,59 +613,13 @@ public class YuGongController extends AbstractYuGongLifeCycle {
                 }
             }
             logger.info("all column build finished!");
-
-            // comment by zhangyq: 改用上面的多线程。
-//            int index = 0;
-//            for (Object obj : tableWhiteList) {
-//                String whiteTable = getTable((String) obj);
-//                logger.info(++index + ". build table info: " + whiteTable);
-//
-//                // 先粗略判断一次
-//                if (!isBlackTable(whiteTable, tableBlackList)) {
-//                    String[] strs = StringUtils.split(whiteTable, ".");
-//                    List<Table> whiteTables = null;
-//                    boolean ignoreSchema = false;
-//                    if (strs.length == 1) {
-//                        whiteTables = TableMetaGenerator.getTableMetasWithoutColumn(globalContext.getSourceDs(),
-//                            null,
-//                            strs[0]);
-//                        ignoreSchema = true;
-//                    } else if (strs.length == 2) {
-//                        whiteTables = TableMetaGenerator.getTableMetasWithoutColumn(globalContext.getSourceDs(),
-//                            strs[0],
-//                            strs[1]);
-//                    } else {
-//                        throw new YuGongException("table[" + whiteTable + "] is not valid");
-//                    }
-//
-//                    if (whiteTables.isEmpty()) {
-//                        throw new YuGongException("table[" + whiteTable + "] is not found");
-//                    }
-//
-//                    for (Table table : whiteTables) {
-//                        // 根据实际表名处理一下
-//                        if (!isBlackTable(table.getName(), tableBlackList)
-//                            && !isBlackTable(table.getFullName(), tableBlackList)) {
-//                            TableMetaGenerator.buildColumns(globalContext.getSourceDs(), table);
-//                            // 构建一下拆分条件
-//                            DataTranslator translator = buildExtKeys(table, (String) obj, targetDbType);
-//                            TableHolder holder = new TableHolder(table);
-//                            holder.ignoreSchema = ignoreSchema;
-//                            holder.translator = translator;
-//                            if (!tables.contains(holder)) {
-//                                tables.add(holder);
-//                            }
-//                        }
-//                    }
-//                }
-//            }
-        } else {
+        } else {            // 没有指定，同步所有表。
             logger.info("white table empty, read all from database...");
             List<Table> metas = TableMetaGenerator.getTableMetasWithoutColumn(globalContext.getSourceDs(), null, null);
             logger.info("read white table size from database: " + metas.size());
             logger.info("all white table: " + metas);
 
-            // add by zhangyq: column build 改用多线程，表很多时，效率提升明显！///////////////////////////////////////////////
+            // add by zhangyq: column build 改用多线程，表很多时///////////////////////////////////////////////
             final BlockingQueue<Table> queue = new LinkedBlockingQueue<Table>();
             queue.addAll(metas);
 
@@ -700,7 +643,7 @@ public class YuGongController extends AbstractYuGongLifeCycle {
                                     if (!isBlackTable(table.getName(), tableBlackList)
                                             && !isBlackTable(table.getFullName(), tableBlackList)) {
                                         logger.info(val + " ---> build column for table: " + table.getName());
-                                        TableMetaGenerator.buildColumns(globalContext.getSourceDs(), table);
+                                        TableMetaGenerator.buildColumns(globalContext.getSourceDs(), table, targetDbType);
                                         // 构建一下拆分条件
                                         DataTranslator translator = buildExtKeys(table, null, targetDbType);
                                         TableHolder holder = new TableHolder(table);
@@ -737,41 +680,7 @@ public class YuGongController extends AbstractYuGongLifeCycle {
                 }
             }
             logger.info("all column build finished!");
-            /////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-            // comment by zhangyq: 改用上面的多线程。
-//            for (Table table : metas) {
-//                index.incrementAndGet();
-//                if (!isBlackTable(table.getName(), tableBlackList)
-//                    && !isBlackTable(table.getFullName(), tableBlackList)) {
-//                    logger.info(index.get() + " ---> build column for table: " + table.getName());
-//                    TableMetaGenerator.buildColumns(globalContext.getSourceDs(), table);
-//                    // 构建一下拆分条件
-//                    DataTranslator translator = buildExtKeys(table, null, targetDbType);
-//                    TableHolder holder = new TableHolder(table);
-//                    holder.translator = translator;
-//                    if (!tables.contains(holder)) {
-//                        tables.add(holder);
-//                    }
-//                } else {
-//                    logger.info(index.get() + " ---> table: " + table.getName() + " in black list, ingore it.");
-//                }
-//            }
         }
-
-        // List<String> noPkTables = Lists.newArrayList();
-        // for (TableHolder tableHolder : tables) {
-        // if (YuGongUtils.isEmpty(tableHolder.table.getPrimaryKeys())) {
-        // noPkTables.add(tableHolder.table.getFullName());
-        // }
-        // }
-        //
-        // if (YuGongUtils.isNotEmpty(noPkTables)) {
-        // throw new YuGongException("Table[" +
-        // StringUtils.join(noPkTables.toArray()) +
-        // "] has no pks , pls check!");
-        // }
         logger.info("check source tables is ok.");
         return tables;
     }

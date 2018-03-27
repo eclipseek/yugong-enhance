@@ -7,9 +7,9 @@ package com.taobao.yugong.common.lifecycle;
  */
 public interface YuGongLifeCycle {
 
-    public void start();
+    void start();
 
-    public void stop();
+    void stop();
 
     /**
      * 异常stop的机制
@@ -17,10 +17,10 @@ public interface YuGongLifeCycle {
      * @param why
      * @param e
      */
-    public void abort(String why, Throwable e);
+    void abort(String why, Throwable e);
 
-    public boolean isStart();
+    boolean isStart();
 
-    public boolean isStop();
+    boolean isStop();
 
 }

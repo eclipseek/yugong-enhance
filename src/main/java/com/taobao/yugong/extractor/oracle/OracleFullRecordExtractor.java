@@ -82,12 +82,15 @@ public class OracleFullRecordExtractor extends AbstractOracleRecordExtractor {
     public void stop() {
         super.stop();
 
-        extractorThread.interrupt();
-        try {
+        if (extractorThread != null) {
+          extractorThread.interrupt();
+          try {
             extractorThread.join(2 * 1000);
-        } catch (InterruptedException e) {
+          } catch (InterruptedException e) {
             // ignore
+          }
         }
+
         tracer.update(context.getTableMeta().getFullName(), ProgressStatus.SUCCESS);
     }
 
@@ -201,6 +204,12 @@ public class OracleFullRecordExtractor extends AbstractOracleRecordExtractor {
         }
 
         public void run() {
+          // 如果只是同步表结构，该线程（执行数据抽取）不用启动。
+          if(context.isOnlyStruct()) {
+            logger.warn("Only sync table struct, exit data extrator.");
+            setStatus(ExtractStatus.TABLE_END);
+            return;
+          }
             while (running) {
                 jdbcTemplate.execute(extractSql, new PreparedStatementCallback() {
 

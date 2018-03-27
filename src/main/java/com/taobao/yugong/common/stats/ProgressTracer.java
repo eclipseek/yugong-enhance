@@ -12,98 +12,98 @@ import com.taobao.yugong.common.model.ProgressStatus;
 import com.taobao.yugong.common.model.RunMode;
 
 /**
- * Í³¼ÆÏÂµ±Ç°¸÷±íÇ¨ÒÆµÄ×´Ì¬
- * 
- * @author agapple 2014-4-24 ÏÂÎç2:12:13
+ * ç»Ÿè®¡ä¸‹å½“å‰å„è¡¨è¿ç§»çš„çŠ¶æ€
+ *
+ * @author agapple 2014-4-24 ä¸‹åˆ2:12:13
  * @since 3.0.4
  */
 public class ProgressTracer {
 
-    private static final Logger         logger       = LoggerFactory.getLogger(ProgressTracer.class);
-    private static final String         FULL_FORMAT  = "{Î´Æô¶¯:%s,È«Á¿ÖĞ:%s,ÒÑÍê³É:%s,Òì³£Êı:%s}";
-    private static final String         INC_FORMAT   = "{Î´Æô¶¯:%s,ÔöÁ¿ÖĞ:%s,ÒÑ×·ÉÏ:%s,Òì³£Êı:%s}";
-    private static final String         CHECK_FORMAT = "{Î´Æô¶¯:%s,¶Ô±ÈÖĞ:%s,ÒÑÍê³É:%s,Òì³£Êı:%s}";
-    private static final String         ALL_FORMAT   = "{Î´Æô¶¯:%s,È«Á¿ÖĞ:%s,ÔöÁ¿ÖĞ:%s,ÒÑ×·ÉÏ:%s,Òì³£Êı:%s}";
+  private static final Logger         logger       = LoggerFactory.getLogger(ProgressTracer.class);
+  private static final String         FULL_FORMAT  = "{æœªå¯åŠ¨:%s,å…¨é‡ä¸­:%s,å·²å®Œæˆ:%s,å¼‚å¸¸æ•°:%s}";
+  private static final String         INC_FORMAT   = "{æœªå¯åŠ¨:%s,å¢é‡ä¸­:%s,å·²è¿½ä¸Š:%s,å¼‚å¸¸æ•°:%s}";
+  private static final String         CHECK_FORMAT = "{æœªå¯åŠ¨:%s,å¯¹æ¯”ä¸­:%s,å·²å®Œæˆ:%s,å¼‚å¸¸æ•°:%s}";
+  private static final String         ALL_FORMAT   = "{æœªå¯åŠ¨:%s,å…¨é‡ä¸­:%s,å¢é‡ä¸­:%s,å·²è¿½ä¸Š:%s,å¼‚å¸¸æ•°:%s}";
 
-    private int                         total;
-    private RunMode                     mode;
-    private Map<String, ProgressStatus> status       = new ConcurrentHashMap<String, ProgressStatus>();
+  private int                         total;
+  private RunMode                     mode;
+  private Map<String, ProgressStatus> status       = new ConcurrentHashMap<String, ProgressStatus>();
 
-    public ProgressTracer(RunMode mode, int total){
-        this.mode = mode;
-        this.total = total;
+  public ProgressTracer(RunMode mode, int total){
+    this.mode = mode;
+    this.total = total;
+  }
+
+  public void update(String tableName, ProgressStatus progress) {
+    ProgressStatus st = status.get(tableName);
+    if (st != ProgressStatus.FAILED) {
+      status.put(tableName, progress);
+    }
+  }
+
+  public void printSummry() {
+    print(false);
+  }
+
+  public void print(boolean detail) {
+    int fulling = 0;
+    int incing = 0;
+    int failed = 0;
+    int success = 0;
+    List<String> fullingTables = new ArrayList<String>();
+    List<String> incingTables = new ArrayList<String>();
+    List<String> failedTables = new ArrayList<String>();
+    List<String> successTables = new ArrayList<String>();
+
+    for (Map.Entry<String, ProgressStatus> entry : status.entrySet()) {
+      ProgressStatus progress = entry.getValue();
+      if (progress == ProgressStatus.FULLING) {
+        fulling++;
+        fullingTables.add(entry.getKey());
+      } else if (progress == ProgressStatus.INCING) {
+        incing++;
+        incingTables.add(entry.getKey());
+      } else if (progress == ProgressStatus.FAILED) {
+        failed++;
+        failedTables.add(entry.getKey());
+      } else if (progress == ProgressStatus.SUCCESS) {
+        success++;
+        successTables.add(entry.getKey());
+      }
     }
 
-    public void update(String tableName, ProgressStatus progress) {
-        ProgressStatus st = status.get(tableName);
-        if (st != ProgressStatus.FAILED) {
-            status.put(tableName, progress);
+    int unknow = this.total - fulling - incing - failed - success;
+    String msg = null;
+    if (mode == RunMode.ALL) {
+      msg = String.format(ALL_FORMAT, new Object[] { unknow, fulling, incing, success, failed });
+    } else if (mode == RunMode.FULL) {
+      msg = String.format(FULL_FORMAT, new Object[] { unknow, fulling, success, failed });
+    } else if (mode == RunMode.INC) {
+      msg = String.format(INC_FORMAT, new Object[] { unknow, incing, success, failed });
+    } else if (mode == RunMode.CHECK) {
+      msg = String.format(CHECK_FORMAT, new Object[] { unknow, fulling, success, failed });
+    }
+
+    logger.info("{}", msg);
+    if (detail) {
+      if (fulling > 0) {
+        if (mode == RunMode.CHECK) {
+          logger.info("å¯¹æ¯”ä¸­:" + fullingTables);
+        } else {
+          logger.info("å…¨é‡ä¸­:" + fullingTables);
         }
+      }
+      if (incing > 0) {
+        logger.info("å¢é‡ä¸­:" + incingTables);
+      }
+      if (failed > 0) {
+        logger.info("å¼‚å¸¸æ•°:" + failedTables);
+      }
+      logger.info("å·²å®Œæˆ:" + successTables);
     }
+  }
 
-    public void printSummry() {
-        print(false);
-    }
-
-    public void print(boolean detail) {
-        int fulling = 0;
-        int incing = 0;
-        int failed = 0;
-        int success = 0;
-        List<String> fullingTables = new ArrayList<String>();
-        List<String> incingTables = new ArrayList<String>();
-        List<String> failedTables = new ArrayList<String>();
-        List<String> successTables = new ArrayList<String>();
-
-        for (Map.Entry<String, ProgressStatus> entry : status.entrySet()) {
-            ProgressStatus progress = entry.getValue();
-            if (progress == ProgressStatus.FULLING) {
-                fulling++;
-                fullingTables.add(entry.getKey());
-            } else if (progress == ProgressStatus.INCING) {
-                incing++;
-                incingTables.add(entry.getKey());
-            } else if (progress == ProgressStatus.FAILED) {
-                failed++;
-                failedTables.add(entry.getKey());
-            } else if (progress == ProgressStatus.SUCCESS) {
-                success++;
-                successTables.add(entry.getKey());
-            }
-        }
-
-        int unknow = this.total - fulling - incing - failed - success;
-        String msg = null;
-        if (mode == RunMode.ALL) {
-            msg = String.format(ALL_FORMAT, new Object[] { unknow, fulling, incing, success, failed });
-        } else if (mode == RunMode.FULL) {
-            msg = String.format(FULL_FORMAT, new Object[] { unknow, fulling, success, failed });
-        } else if (mode == RunMode.INC) {
-            msg = String.format(INC_FORMAT, new Object[] { unknow, incing, success, failed });
-        } else if (mode == RunMode.CHECK) {
-            msg = String.format(CHECK_FORMAT, new Object[] { unknow, fulling, success, failed });
-        }
-
-        logger.info("{}", msg);
-        if (detail) {
-            if (fulling > 0) {
-                if (mode == RunMode.CHECK) {
-                    logger.info("¶Ô±ÈÖĞ:" + fullingTables);
-                } else {
-                    logger.info("È«Á¿ÖĞ:" + fullingTables);
-                }
-            }
-            if (incing > 0) {
-                logger.info("ÔöÁ¿ÖĞ:" + incingTables);
-            }
-            if (failed > 0) {
-                logger.info("Òì³£Êı:" + failedTables);
-            }
-            logger.info("ÒÑÍê³É:" + successTables);
-        }
-    }
-
-    public static void main(String args[]) {
-        System.out.println("ÖĞÎÄ²âÊÔ/");
-    }
+  public static void main(String args[]) {
+    System.out.println("ä¸­æ–‡æµ‹è¯•/");
+  }
 }

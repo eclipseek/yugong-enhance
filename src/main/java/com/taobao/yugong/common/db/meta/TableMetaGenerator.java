@@ -16,6 +16,8 @@ import java.util.Set;
 
 import javax.sql.DataSource;
 
+import com.taobao.yugong.common.model.DbType;
+import com.taobao.yugong.common.model.YuGongContext;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.ConnectionCallback;
@@ -90,7 +92,7 @@ public class TableMetaGenerator {
                         String typeName = rs.getString(6);
                         int data_length = rs.getInt("char_octet_length");
                         int column_id = rs.getInt("ordinal_position");
-                        columnType = convertSqlType(columnType, typeName);
+                        columnType = convertSqlType(columnType, typeName, DbType.SUNDB);
                         ColumnMeta col = new ColumnMeta(columnName, columnType, data_length, column_id);
                         columnList.add(col);
                     }
@@ -287,6 +289,10 @@ public class TableMetaGenerator {
     }
 
     public static void buildColumns(DataSource dataSource, final Table table) {
+        buildColumns(dataSource, table, DbType.MYSQL);
+    }
+
+    public static void buildColumns(DataSource dataSource, final Table table, final DbType dbType) {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
         jdbcTemplate.execute(new ConnectionCallback() {
 
@@ -311,7 +317,7 @@ public class TableMetaGenerator {
                         int data_length = rs.getInt("char_octet_length");
                         int column_id = rs.getInt("ordinal_position");
 
-                        columnType = convertSqlType(columnType, typeName);
+                        columnType = convertSqlType(columnType, typeName, dbType);
                         ColumnMeta col = new ColumnMeta(columnName, columnType, data_length, column_id);
                         columnList.add(col);
                     }
@@ -420,7 +426,7 @@ public class TableMetaGenerator {
         }
     }
 
-    private static int convertSqlType(int columnType, String typeName) {
+    private static int convertSqlType(int columnType, String typeName, DbType dbType) {
         String[] typeSplit = typeName.split(" ");
         if (typeSplit.length > 1) {
             if (columnType == Types.INTEGER && StringUtils.equalsIgnoreCase(typeSplit[1], "UNSIGNED")) {
@@ -442,6 +448,14 @@ public class TableMetaGenerator {
                 columnType = Types.TIMESTAMP;
             }
         }
+
+        if(dbType.equals(DbType.SUNDB)) {
+            // sundb 不支持 decimal 类型， 转换成 NUMERIC
+            if (columnType == Types.DECIMAL) {
+                columnType = Types.NUMERIC;
+            }
+        }
+
         return columnType;
     }
 

@@ -1,21 +1,5 @@
 package com.taobao.yugong.applier;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataAccessException;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.PreparedStatementCallback;
-
 import com.google.common.collect.MigrateMap;
 import com.taobao.yugong.common.db.meta.ColumnValue;
 import com.taobao.yugong.common.db.meta.Table;
@@ -27,6 +11,15 @@ import com.taobao.yugong.common.model.record.IncrementRecord;
 import com.taobao.yugong.common.model.record.Record;
 import com.taobao.yugong.common.utils.YuGongUtils;
 import com.taobao.yugong.exception.YuGongException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementCallback;
+
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.util.*;
 
 /**
  * 增量数据同步
@@ -80,114 +73,57 @@ public class IncrementRecordApplier extends AbstractRecordApplier {
         applyOneByOne(records, jdbcTemplate);
     }
 
-
-    protected void applyOneByOneDadb(List<IncrementRecord> incRecords) {
-        try {
-            Connection conn = DriverManager.getConnection(context.getDadbContext().getUrl(),
-                    context.getDadbContext().getUser(),
-                    context.getDadbContext().getPassword());
-
-            for (final IncrementRecord incRecord : incRecords) {
-                TableSqlUnit sqlUnit = getSqlUnit(incRecord);
-                PreparedStatement ps = conn.prepareStatement(sqlUnit.applierSql);
-                final Map<String, Integer> indexs = sqlUnit.applierIndexs;
-                int count = 0;
-                // 字段
-                List<ColumnValue> cvs = incRecord.getColumns();
-                for (ColumnValue cv : cvs) {
-                    Integer index = getIndex(indexs, cv, true); // 考虑delete的目标库主键，可能在源库的column中
-                    if (index != null) {
-                        ps.setObject(index, cv.getValue());
-                        count++;
-                    }
-                }
-
-                // 添加主键
-                List<ColumnValue> pks = incRecord.getPrimaryKeys();
-                for (ColumnValue pk : pks) {
-                    Integer index = getIndex(indexs, pk, true);// 考虑delete的目标库主键，可能在源库的column中
-                    if (index != null) {
-                        ps.setObject(index, pk.getValue());
-                        count++;
-                    }
-                }
-
-                if (count != indexs.size()) {
-                    processMissColumn(incRecord, indexs);
-                }
-
-                try {
-                    ps.execute();
-                } catch (SQLException e) {
-                    if (context.isSkipApplierException()) {
-                        logger.error("skiped Record Data : " + incRecord.toString(), e);
-                    } else {
-                        throw new SQLException("failed Record Data : " + incRecord.toString(), e);
-                    }
-                }
-            }
-            conn.close();
-            System.out.println("IncrementRecordApplier.applyOneByOneDadb connection closed: " + incRecords.size());
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
     /**
      * 一条条记录串行处理
      */
     protected void applyOneByOne(List<IncrementRecord> incRecords, JdbcTemplate jdbcTemplate) {
-        if(context.getDadbContext() != null) {
-            applyOneByOneDadb(incRecords);
-        } else {
-            for (final IncrementRecord incRecord : incRecords) {
-                TableSqlUnit sqlUnit = getSqlUnit(incRecord);
-                String applierSql = sqlUnit.applierSql;
-                final Map<String, Integer> indexs = sqlUnit.applierIndexs;
-                jdbcTemplate.execute(applierSql, new PreparedStatementCallback() {
+        for (final IncrementRecord incRecord : incRecords) {
+            TableSqlUnit sqlUnit = getSqlUnit(incRecord);
+            String applierSql = sqlUnit.applierSql;
+            final Map<String, Integer> indexs = sqlUnit.applierIndexs;
+            jdbcTemplate.execute(applierSql, new PreparedStatementCallback() {
 
-                    public Object doInPreparedStatement(PreparedStatement ps) throws SQLException, DataAccessException {
+                public Object doInPreparedStatement(PreparedStatement ps) throws SQLException, DataAccessException {
 
-                        int count = 0;
-                        // 字段
-                        List<ColumnValue> cvs = incRecord.getColumns();
-                        for (ColumnValue cv : cvs) {
-                            Integer index = getIndex(indexs, cv, true); // 考虑delete的目标库主键，可能在源库的column中
-                            if (index != null) {
-                                ps.setObject(index, cv.getValue(), cv.getColumn().getType());
-                                count++;
-                            }
+                    int count = 0;
+                    // 字段
+                    List<ColumnValue> cvs = incRecord.getColumns();
+                    for (ColumnValue cv : cvs) {
+                        Integer index = getIndex(indexs, cv, true); // 考虑delete的目标库主键，可能在源库的column中
+                        if (index != null) {
+                            ps.setObject(index, cv.getValue(), cv.getColumn().getType());
+                            count++;
                         }
-
-                        // 添加主键
-                        List<ColumnValue> pks = incRecord.getPrimaryKeys();
-                        for (ColumnValue pk : pks) {
-                            Integer index = getIndex(indexs, pk, true);// 考虑delete的目标库主键，可能在源库的column中
-                            if (index != null) {
-                                ps.setObject(index, pk.getValue(), pk.getColumn().getType());
-                                count++;
-                            }
-                        }
-
-                        if (count != indexs.size()) {
-                            processMissColumn(incRecord, indexs);
-                        }
-
-                        try {
-                            ps.execute();
-                        } catch (SQLException e) {
-                            if (context.isSkipApplierException()) {
-                                logger.error("skiped Record Data : " + incRecord.toString(), e);
-                            } else {
-                                throw new SQLException("failed Record Data : " + incRecord.toString(), e);
-                            }
-                        }
-
-                        return null;
                     }
 
-                });
-            }
+                    // 添加主键
+                    List<ColumnValue> pks = incRecord.getPrimaryKeys();
+                    for (ColumnValue pk : pks) {
+                        Integer index = getIndex(indexs, pk, true);// 考虑delete的目标库主键，可能在源库的column中
+                        if (index != null) {
+                            ps.setObject(index, pk.getValue(), pk.getColumn().getType());
+                            count++;
+                        }
+                    }
+
+                    if (count != indexs.size()) {
+                        processMissColumn(incRecord, indexs);
+                    }
+
+                    try {
+                        ps.execute();
+                    } catch (SQLException e) {
+                        if (context.isSkipApplierException()) {
+                            logger.error("skiped Record Data : " + incRecord.toString(), e);
+                        } else {
+                            throw new SQLException("failed Record Data : " + incRecord.toString(), e);
+                        }
+                    }
+
+                    return null;
+                }
+
+            });
         }
     }
 
@@ -240,6 +176,12 @@ public class IncrementRecordApplier extends AbstractRecordApplier {
                                 meta.getName(),
                                 primaryKeys,
                                 columns);
+                        } else if (dbType == DbType.SUNDB) {
+                            applierSql = SqlTemplates.SUNDB.getMergeSql(meta.getSchema(),
+                                    meta.getName(),
+                                    primaryKeys,
+                                    columns,
+                                    false);
                         }
                     } else {
                         if (YuGongUtils.isEmpty(meta.getColumns()) && dbType == DbType.MYSQL) {
@@ -314,6 +256,11 @@ public class IncrementRecordApplier extends AbstractRecordApplier {
                                 meta.getName(),
                                 primaryKeys,
                                 columns);
+                        } else if (dbType == DbType.SUNDB) {
+                            applierSql = SqlTemplates.SUNDB.getUpdateSql(meta.getSchema(),
+                                 meta.getName(),
+                                 primaryKeys,
+                                 columns);
                         }
                     } else {
                         applierSql = SqlTemplates.COMMON.getUpdateSql(meta.getSchema(),

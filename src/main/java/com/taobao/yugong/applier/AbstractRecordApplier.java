@@ -3,6 +3,7 @@ package com.taobao.yugong.applier;
 import java.sql.*;
 import java.util.*;
 
+import com.alibaba.druid.pool.DruidDataSource;
 import com.google.common.collect.Lists;
 import com.taobao.yugong.common.db.meta.ColumnMeta;
 import com.taobao.yugong.common.db.meta.ColumnValue;
@@ -11,6 +12,8 @@ import com.taobao.yugong.common.lifecycle.AbstractYuGongLifeCycle;
 import com.taobao.yugong.common.model.UserIndexItem;
 import com.taobao.yugong.common.model.YuGongContext;
 import com.taobao.yugong.common.model.record.Record;
+import com.taobao.yugong.common.utils.Keywords;
+import com.taobao.yugong.common.utils.TypeMapping;
 import com.taobao.yugong.exception.YuGongException;
 import org.apache.commons.collections.map.CaseInsensitiveMap;
 import org.slf4j.Logger;
@@ -119,7 +122,7 @@ public abstract class AbstractRecordApplier extends AbstractYuGongLifeCycle impl
     /**
      * 获取主键字段信息，从Table元数据中获取。因为物化视图由with primary 改为with (shardkey)
      *
-     * @param record
+     * @param
      * @return
      */
     protected String[] getPrimaryNames(Table tableMeta) {
@@ -155,7 +158,7 @@ public abstract class AbstractRecordApplier extends AbstractYuGongLifeCycle impl
     public boolean isTableExist(YuGongContext context) {
         boolean exist = false;
 
-        DataSource ds = context.getTargetDs();
+        final DataSource ds = context.getTargetDs();
         Table table = context.getTableMeta();
 
         // 查询表是否已经存在，如已存在不创建。
@@ -166,15 +169,32 @@ public abstract class AbstractRecordApplier extends AbstractYuGongLifeCycle impl
                 public Object doInConnection(Connection con) throws SQLException, DataAccessException {
                     boolean exist = false;
                     String database = con.getCatalog();
-                    ResultSet rs = con.prepareStatement("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '" + database + "'").executeQuery();
-                    while (rs.next()) {
-                        if(rs.getString(1).toLowerCase().equals(tableName)) {
-                            logger.info("table [{}]  exist, exit create.", tableName);
-                            exist = true;
-                            break;
+
+                    // 接入 dadb
+                    if (((DruidDataSource) ds).getUrl().contains("dadb")) {
+                        String sql = "select * from " + tableName;
+                        try {
+                          con.prepareStatement(sql).executeQuery();
+                          exist = true;
+                        } catch (Exception e) {
+                          // 表不存在
+                          if (e.toString().toLowerCase().contains("doesn't exist")) {
+                              exist = false;
+                          } else {
+                            logger.error("ERROR: ", e);
+                          }
                         }
+                    } else {
+                      ResultSet rs = con.prepareStatement("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '" + database + "'").executeQuery();
+                      while (rs.next()) {
+                        if(rs.getString(1).toLowerCase().equals(tableName)) {
+                          logger.info("table [{}]  exist, exit create.", tableName);
+                          exist = true;
+                          break;
+                        }
+                      }
                     }
-                    return exist;
+                  return exist;
                 }
             });
         } catch (Exception e) {
@@ -198,42 +218,19 @@ public abstract class AbstractRecordApplier extends AbstractYuGongLifeCycle impl
         DataSource ds = context.getTargetDs();
         Table table = context.getTableMeta();
         final String tableName = table.getName().toLowerCase();
-        List<ColumnMeta> primaryKeys = table.getPrimaryKeys();
         List<ColumnMeta> columns = table.getColumnsWithPrimary();
+        // 每个列有自己的 order（表示顺序，可以从oracle 元数据信息中查出），依据 order 排个序
         Collections.sort(columns);
 
-        logger.info("begin create table [{}], recursion = {}", tableName, recursion.get());
-        logger.info("table [{}] not exist, prepare to create it...", tableName);
+        logger.info("begin create table [{}], retry times = {}", tableName, recursion.get());
 
         StringBuilder sb = new StringBuilder();
         sb.append("CREATE TABLE ");
         sb.append(tableName + "(");
 
-        // 字段类型映射
-        Map<Integer, String> types = new HashMap<Integer, String>();
-        types.put(Types.INTEGER, "INTEGER");
-        types.put(Types.TINYINT, "TINYINT");
-        types.put(Types.SMALLINT, "SMALLINT");
-        types.put(Types.BIGINT, "BIGINT");
-        types.put(Types.DECIMAL, "DECIMAL");
-        types.put(Types.BIT, "BIT");
-        types.put(Types.REAL, "REAL");
-        types.put(Types.DATE, "DATE");
-        types.put(Types.TIME, "TIME");
-        types.put(Types.TIMESTAMP, "DATETIME");
-        types.put(Types.BLOB, "BLOB");
-        types.put(Types.CLOB, "TEXT");
-        types.put(Types.CHAR, "CHAR");
-        types.put(Types.VARCHAR, "VARCHAR");
-        types.put(Types.NUMERIC, "NUMERIC");
-        types.put(Types.FLOAT, "FLOAT");
-
-        //List<String> pks = new ArrayList<String>();
-        //for (ColumnMeta pcm : primaryKeys) {
-        //    pks.add(pcm.getName());
-        //}
-
+        // 用户索引信息。
         UserIndexList<UserIndexItem> userIndexItems = new UserIndexList<UserIndexItem>();
+        // 第一次不用加载索引
         if (recursion.get() > 0) {
             if (!indexLoaded) {
                 loadUserIndexes(context.getSourceDs());
@@ -243,114 +240,10 @@ public abstract class AbstractRecordApplier extends AbstractYuGongLifeCycle impl
             }
         }
 
-        // 所有列
-        for(ColumnMeta cm : columns) {
-            int length = cm.getData_length();
-            int type = cm.getType();
-            String name = cm.getName();
-            // oracle 中 key 可以作为字段名字，mysql 中，key 是关键字。
-            if (name.toLowerCase().equals("key")) {
-                name = name + "_MYSQL";
-            }
-            // oracle 中 condition 可以作为字段名字，mysql 中，condition 是关键字。
-            if (name.toLowerCase().equals("condition")) {
-                name = name + "_MYSQL";
-            }
+        // 拼接列
+        columnsCreateString(table, userIndexItems, sb);
 
-            // oracle 中 condition 可以作为字段名字，mysql 中，condition 是关键字。
-            if (name.toLowerCase().equals("sql")) {
-                name = name + "_MYSQL";
-            }
-
-            sb.append("\n");
-            sb.append(name + " ");
-
-            boolean appendLength = true;
-            // 需要将部分 varchar 字段转换成 TEXT/BLOB，
-            if (recursion.get() > 0 && (type == Types.VARCHAR)) {
-                // 优先将所有不在 index 中的字段，都转换成 TEXT/BLOB
-                if (recursion.get() == 1) {
-                    // 字段不在 index 列表中，将其替换成 TEXT/BLOB
-                    if (!userIndexItems.contains(name)) {
-                        sb.append("TEXT");
-                        appendLength = false;
-                        logger.info("table [{}].{} is not index, type change from varchar to text. ", table.getFullName(), name);
-                    } else {
-                        sb.append(types.get(type));
-                    }
-                }
-                // 如果不是 index 的字段转换成 TEXT/BLOB 类型后，创建表还是存在 error= 1118 类型 sql 异常，
-                // 再考虑将普通类型的（非 primary key, 非 unique ）索引字段，转换成 TEXT/BLOB 类型。
-                else if (recursion.get() == 2) {
-                    UserIndexList<UserIndexItem> normalIndex = userIndexItems.getIndex(name, null);
-                    if(normalIndex.contains(name)) {
-                        sb.append("TEXT");
-                        appendLength = false;
-                        logger.warn("table [{}].{} is normal index, type change from varchar to text! ",table.getFullName(), name);
-                    } else {
-                        sb.append(types.get(type));
-                    }
-                }
-
-                // 如果还是报 1118 类型 sql 异常，再考虑将 unique 类型索引，转换成 TEXT/BLOB 类型。
-                else if (recursion.get() == 3) {
-                    UserIndexList<UserIndexItem> uniqueIndex = userIndexItems.getIndex(name, "u");
-                    if(uniqueIndex.contains(name)) {
-                        sb.append("TEXT");
-                        appendLength = false;
-                        logger.warn("table [{}].{} is unique index, type change from varchar to text! ",table.getFullName(), name);
-                    } else {
-                        sb.append(types.get(type));
-                    }
-                }
-
-                // 如果以上1，2，3 情况下 varchar 类型都转换 TEXT/BLOB 后，还是报 1118 sql 异常，
-                // 最后考虑将 primary key 的索引字段，转换成 TEXT/BLOB 类型。
-                // 这种情况是最坏的打算，所以放到最低优先级，如果发生这种情况，说明在 oracle 到 mysql 的表结构迁移存在兼容问题，
-                // 且没有妥协方案，此时应考虑重新设计表。
-                else if (recursion.get() == 4) {
-                    UserIndexList<UserIndexItem> primaryIndex = userIndexItems.getIndex(name, "p");
-                    if(primaryIndex.contains(name)) {
-                        sb.append("TEXT");
-                        appendLength = false;
-                        logger.warn("table [{}].{} is primary index, type change from varchar to text! ",table.getFullName(), name);
-                    } else {
-                        sb.append(types.get(type));
-                    }
-                }
-
-                else {
-                    logger.warn("recursion > 4, change [{}] all varchar field to text!", table.getFullName());
-                    sb.append("TEXT");
-                    appendLength = false;
-                }
-            } else {
-                sb.append(types.get(type));
-            }
-
-            if(type == Types.DECIMAL || type == Types.CHAR || (type == Types.VARCHAR)) {
-                if (appendLength) {
-                    sb.append("(" + length + ")");
-                }
-            }
-
-            sb.append(",");
-        }
-
-        //// 主键
-        //if (!primaryKeys.isEmpty()) {
-        //    sb.append("\n");
-        //
-        //    sb.append("primary key(");
-        //    for (ColumnMeta cm : primaryKeys) {
-        //        sb.append(cm.getName());
-        //        sb.append(",");
-        //    }
-        //    sb.delete(sb.length()-1, sb.length());
-        //    sb.append(")");
-        //} else {
-        //
-        //}
+        checkRowId(table, context, sb);
 
         sb.delete(sb.length()-1, sb.length());
         sb.append("\n)");
@@ -381,6 +274,7 @@ public abstract class AbstractRecordApplier extends AbstractYuGongLifeCycle impl
             }
         });
 
+        // 创建失败，递归一次。
         if (recursion.get() > recursion_temp) {
             rtn = createTable(context);
         }
@@ -389,10 +283,133 @@ public abstract class AbstractRecordApplier extends AbstractYuGongLifeCycle impl
             recursion.set(recursion.get() - 1);
         }
 
-        logger.info("end create table [{}], recursion = {}", tableName, recursion.get());
+        logger.info("end create table [{}], retry times = {}", tableName, recursion.get());
 
         // 返回是否创建成功
         return rtn == null? false : true;
+    }
+
+    /**
+     * 拼接建表语句中的 列部分。
+     * @param table 表信息
+     * @param userIndexItems 索引信息
+     * @param dest 目标串
+     * @return void
+     */
+    private void columnsCreateString(Table table, UserIndexList<UserIndexItem> userIndexItems, StringBuilder dest) {
+
+        String tableName = table.getName().toLowerCase();
+        List<ColumnMeta> columnMetas = table.getColumnsWithPrimary();
+
+        // 所有列
+        for(ColumnMeta cm : columnMetas) {
+            int length = cm.getData_length();
+            int type = cm.getType();
+            String name = cm.getName();
+            if (Keywords.contains(name)) {
+                name += "_MYSQL";
+            }
+
+            dest.append("\n");
+            dest.append(name + " ");
+
+            boolean appendLength = true;
+            // 需要将部分 varchar 字段转换成 TEXT/BLOB，
+            if (recursion.get() > 0 && (type == Types.VARCHAR)) {
+                // 优先将所有不在 index 中的字段，都转换成 TEXT/BLOB
+                if (recursion.get() == 1) {
+                    // 字段不在 index 列表中，将其替换成 TEXT/BLOB
+                    if (!userIndexItems.contains(name)) {
+                        dest.append("TEXT");
+                        appendLength = false;
+                        logger.info("table [{}].{} is not index, type change from varchar to text. ", tableName, name);
+                    } else {
+                        dest.append(TypeMapping.get(type));
+                    }
+                }
+                // 如果不是 index 的字段转换成 TEXT/BLOB 类型后，创建表还是存在 error= 1118 类型 sql 异常，
+                // 再考虑将普通类型的（非 primary key, 非 unique ）索引字段，转换成 TEXT/BLOB 类型。
+                else if (recursion.get() == 2) {
+                    UserIndexList<UserIndexItem> normalIndex = userIndexItems.getIndex(name, null);
+                    if(normalIndex.contains(name)) {
+                        dest.append("TEXT");
+                        appendLength = false;
+                        logger.warn("table [{}].{} is normal index, type change from varchar to text! ",tableName, name);
+                    } else {
+                        dest.append(TypeMapping.get(type));
+                    }
+                }
+
+                // 如果还是报 1118 类型 sql 异常，再考虑将 unique 类型索引，转换成 TEXT/BLOB 类型。
+                else if (recursion.get() == 3) {
+                    UserIndexList<UserIndexItem> uniqueIndex = userIndexItems.getIndex(name, "u");
+                    if(uniqueIndex.contains(name)) {
+                        dest.append("TEXT");
+                        appendLength = false;
+                        logger.warn("table [{}].{} is unique index, type change from varchar to text! ",tableName, name);
+                    } else {
+                        dest.append(TypeMapping.get(type));
+                    }
+                }
+
+                // 如果以上1，2，3 情况下 varchar 类型都转换 TEXT/BLOB 后，还是报 1118 sql 异常，
+                // 最后考虑将 primary key 的索引字段，转换成 TEXT/BLOB 类型。
+                // 这种情况是最坏的打算，所以放到最低优先级，如果发生这种情况，说明在 oracle 到 mysql 的表结构迁移存在兼容问题，
+                // 且没有妥协方案，此时应考虑重新设计表。
+                else if (recursion.get() == 4) {
+                    UserIndexList<UserIndexItem> primaryIndex = userIndexItems.getIndex(name, "p");
+                    if(primaryIndex.contains(name)) {
+                        dest.append("TEXT");
+                        appendLength = false;
+                        logger.warn("table [{}].{} is primary index, type change from varchar to text! ",tableName, name);
+                    } else {
+                        dest.append(TypeMapping.get(type));
+                    }
+                }
+
+                else {
+                    logger.warn("recursion > 4, change [{}] all varchar field to text!", tableName);
+                    dest.append("TEXT");
+                    appendLength = false;
+                }
+            } else {
+                dest.append(TypeMapping.get(type));
+            }
+
+            if(type == Types.DECIMAL || type == Types.CHAR || (type == Types.VARCHAR)) {
+                if (appendLength) {
+                    dest.append("(" + length + ")");
+                }
+            }
+
+            if (type == Types.CHAR || type == Types.VARCHAR) {
+                dest.append(" BINARY");
+            }
+
+            dest.append(",");
+        }
+    }
+
+    /**
+     * 检查是否要用 oracle 的 rowid 作为主键。
+     * @param table
+     * @param context
+     * @param dest
+     * @return void
+     */
+    private void checkRowId(Table table, YuGongContext context, StringBuilder dest) {
+        // 如果有主键了，就不检查了。
+        if (table.getPrimaryKeys().size() > 0) {
+            return;
+        }
+
+        // 配置文件声明了需要添加
+        if (!context.isAddPrimaryKey()) {
+            return;
+        }
+
+        String rowid = "\nROWID VARCHAR(50) BINARY NOT NULL,\nPRIMARY KEY (ROWID),";
+        dest.append(rowid);
     }
 
     // tableName, indexName, UserIndex
@@ -461,6 +478,11 @@ public abstract class AbstractRecordApplier extends AbstractYuGongLifeCycle impl
         }
     }
 
+    /**
+     * 从源库查找有哪些 index
+     * @param ds    源库
+     * @return void
+     */
     private void loadUserIndexes(DataSource ds) {
         synchronized(mutex) {
             if (!indexLoaded) {

@@ -238,6 +238,12 @@ public class SqlTemplate {
 
     protected String getColumnName(ColumnMeta column) {
         return column.getName();
+
+        //String name = column.getName();
+        //if (name.equalsIgnoreCase("M_ROW$$")) {
+        //    name = "ROWID";
+        //}
+        //return name;
     }
 
     protected String splitCommea(int size, int i) {

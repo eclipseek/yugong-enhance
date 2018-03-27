@@ -15,12 +15,12 @@ import com.taobao.yugong.exception.YuGongException;
  */
 public interface RecordApplier extends YuGongLifeCycle {
 
-    public void apply(List<Record> records) throws YuGongException;
+    void apply(List<Record> records) throws YuGongException;
 
-    public boolean isTableExist(YuGongContext context);
+    boolean isTableExist(YuGongContext context);
 
-    public boolean createTable(YuGongContext context);
+    boolean createTable(YuGongContext context);
 
-    public void createIndex(YuGongContext context);
+    void createIndex(YuGongContext context);
 
 }

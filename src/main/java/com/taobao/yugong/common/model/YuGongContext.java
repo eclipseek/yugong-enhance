@@ -25,22 +25,15 @@ public class YuGongContext {
     private boolean    autoCreateTable      = false;    // 同步数据时，如果表不存在，是否自动创建表
     private boolean    autoCreateIndex      = false;    // 是否自动创建索引。
     private boolean    onlyStruct           = false;    // 是否只创建表结构，不迁移数据
+    // stinson
+    private boolean addPrimaryKey = false;              // 如果不存在主键，是否将 oracle 中 rowid 作为主键。
+    private boolean reCreateTableOnStart = false;              // 启动时重建表
+    private boolean applierWithTransaction = false;
     private RunMode    runMode;
     private int        onceCrawNum;                   // 每次提取的记录数
     private int        tpsLimit             = 0;      // <=0代表不限制
     private DataSource sourceDs;                      // 源数据库链接
     private DataSource targetDs;                      // 目标数据库链接
-
-    private DataSource dadbDataSource;
-
-    public DataSource getDadbDataSource() {
-        return dadbDataSource;
-    }
-
-    public YuGongContext setDadbDataSource(DataSource dadbDataSource) {
-        this.dadbDataSource = dadbDataSource;
-        return this;
-    }
 
     private boolean    batchApply           = false;
     private boolean    skipApplierException = false;  // 是否允许跳过applier异常
@@ -179,6 +172,30 @@ public class YuGongContext {
         return this;
     }
 
+    public boolean isAddPrimaryKey() {
+        return addPrimaryKey;
+    }
+
+    public void setAddPrimaryKey(boolean addPrimaryKey) {
+        this.addPrimaryKey = addPrimaryKey;
+    }
+
+    public boolean isReCreateTableOnStart() {
+        return reCreateTableOnStart;
+    }
+
+    public void setReCreateTableOnStart(boolean reCreateTableOnStart) {
+        this.reCreateTableOnStart = reCreateTableOnStart;
+    }
+
+    public boolean isApplierWithTransaction() {
+        return applierWithTransaction;
+    }
+
+    public void setApplierWithTransaction(boolean applierWithTransaction) {
+        this.applierWithTransaction = applierWithTransaction;
+    }
+
     public YuGongContext cloneGlobalContext() {
         YuGongContext context = new YuGongContext();
         context.setRunMode(runMode);
@@ -191,23 +208,13 @@ public class YuGongContext {
         context.setAutoCreateTable(autoCreateTable);
         context.setOnlyStruct(onlyStruct);
         context.setAutoCreateIndex(autoCreateIndex);
+        context.setAddPrimaryKey(addPrimaryKey);
+        context.setReCreateTableOnStart(reCreateTableOnStart);
+        context.setApplierWithTransaction(applierWithTransaction);
         context.setOnceCrawNum(onceCrawNum);
         context.setTpsLimit(tpsLimit);
         context.setIgnoreSchema(ignoreSchema);
         context.setSkipApplierException(skipApplierException);
-        context.setDadbContext(dadbContext);
         return context;
-    }
-
-
-    private DADBContext dadbContext;
-
-    public DADBContext getDadbContext() {
-        return dadbContext;
-    }
-
-    public YuGongContext setDadbContext(DADBContext dadbContext) {
-        this.dadbContext = dadbContext;
-        return this;
     }
 }

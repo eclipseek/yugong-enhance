@@ -64,16 +64,20 @@ public class OracleRecRecordExtractor extends AbstractOracleRecordExtractor {
         String tableName = context.getTableMeta().getName();
         String extKey = context.getTableMeta().getExtKey();
         String createMlogSql = null;
+
+        String key = "sequence (" + extKey + ") including new values";
         // 支持不分表
         if (StringUtils.isBlank(extKey)) {
             // 只处理主键时,可以不带上including new values,可以减少非主键变更时的一条mlog记录
-            createMlogSql = MessageFormat.format(CREATE_MLOG_FORMAT, new Object[] { schemaName, tableName,
-                    " primary key, sequence" });
-        } else {
-            createMlogSql = MessageFormat.format(CREATE_MLOG_FORMAT, new Object[] { schemaName, tableName,
-                    "sequence (" + extKey + ") including new values" });
+            // 默认使用主键
+            key = " primary key, sequence";
+            // 没有主键，使用 rowid
+            if (context.getTableMeta().getPrimaryKeys().size() == 0) {
+                key = " rowid, sequence";
+            }
         }
 
+        createMlogSql = MessageFormat.format(CREATE_MLOG_FORMAT, new Object[] { schemaName, tableName, key });    // stinson
         String mlogName = TableMetaGenerator.getMLogTableName(context.getSourceDs(), schemaName, tableName);
         if (mlogName == null) {
             JdbcTemplate jdbcTemplate = new JdbcTemplate(context.getSourceDs());

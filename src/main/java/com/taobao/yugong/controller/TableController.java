@@ -17,6 +17,8 @@ public class TableController {
 
     public TableController(int total, int cocurrent){
         this.countLatch = new CountDownLatch(total);
+
+        // comment by zhangyq: concurrent 是所有表数据同步共用的线程数。
         this.sem = new Semaphore(cocurrent);
     }
 
@@ -30,6 +32,7 @@ public class TableController {
         countLatch.countDown();
     }
 
+    // 获取已经结束的（包括正常结束和异常结束的）
     public YuGongInstance takeDone() throws InterruptedException {
         return queue.take();
     }

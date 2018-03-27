@@ -178,56 +178,6 @@ public class MultiThreadIncrementRecordApplier extends IncrementRecordApplier {
         }
     }
 
-    protected  void applyBatch0Dadb(final List<IncrementRecord> incRecords, JdbcTemplate jdbcTemplate, IncrementOpType opType) throws Exception {
-        try {
-            Connection conn = DriverManager.getConnection(context.getDadbContext().getUrl(),
-                    context.getDadbContext().getUser(),
-                    context.getDadbContext().getPassword());
-            TableSqlUnit sqlUnit = getSqlUnit(incRecords.get(0));
-            PreparedStatement ps = conn.prepareStatement(sqlUnit.applierSql);
-            final Map<String, Integer> indexs = sqlUnit.applierIndexs;
-
-            for (IncrementRecord incRecord : incRecords) {
-                int count = 0;
-
-                // 需要先加字段
-                List<ColumnValue> cvs = incRecord.getColumns();
-                for (ColumnValue cv : cvs) {
-                    Integer index = getIndex(indexs, cv, true); // 考虑delete的目标库主键，可能在源库的column中
-                    if (index != null) {
-                        ps.setObject(index, cv.getValue());
-                        count++;
-                    }
-                }
-
-                // 添加主键
-                List<ColumnValue> pks = incRecord.getPrimaryKeys();
-                for (ColumnValue pk : pks) {
-                    Integer index = getIndex(indexs, pk, true);// 考虑delete的目标库主键，可能在源库的column中
-                    if (index != null) {
-                        ps.setObject(index, pk.getValue());
-                        count++;
-                    }
-                }
-
-                if (count != indexs.size()) {
-                    processMissColumn(incRecord, indexs);
-                }
-
-                ps.addBatch();
-            }
-            ps.executeBatch();
-            conn.close();
-
-            System.out.println("MultiThreadIncrementRecordApplier.applyBatch0Dadb connection closed: " + incRecords.size());
-        } catch (Exception e) {
-            // catch the biggest exception,no matter how, rollback it;
-            e.printStackTrace();
-            throw e;
-            // conn.rollback();
-        }
-    }
-
     /**
      * batch处理支持
      */
@@ -238,61 +188,52 @@ public class MultiThreadIncrementRecordApplier extends IncrementRecordApplier {
 
         boolean redoOneByOne = false;
 
-        if (context.getDadbContext() != null) {
-            try {
-                applyBatch0Dadb(incRecords, jdbcTemplate, opType);
-            } catch (Exception e) {
-                redoOneByOne = true;
-                e.printStackTrace();
-            }
-        } else {
-            try {
-                TableSqlUnit sqlUnit = getSqlUnit(incRecords.get(0));
-                String applierSql = sqlUnit.applierSql;
-                final Map<String, Integer> indexs = sqlUnit.applierIndexs;
-                jdbcTemplate.execute(applierSql, new PreparedStatementCallback() {
+        try {
+            TableSqlUnit sqlUnit = getSqlUnit(incRecords.get(0));
+            String applierSql = sqlUnit.applierSql;
+            final Map<String, Integer> indexs = sqlUnit.applierIndexs;
+            jdbcTemplate.execute(applierSql, new PreparedStatementCallback() {
 
-                    public Object doInPreparedStatement(PreparedStatement ps) throws SQLException, DataAccessException {
+                public Object doInPreparedStatement(PreparedStatement ps) throws SQLException, DataAccessException {
 
-                        for (IncrementRecord incRecord : incRecords) {
-                            int count = 0;
+                    for (IncrementRecord incRecord : incRecords) {
+                        int count = 0;
 
-                            // 需要先加字段
-                            List<ColumnValue> cvs = incRecord.getColumns();
-                            for (ColumnValue cv : cvs) {
-                                Integer index = getIndex(indexs, cv, true); // 考虑delete的目标库主键，可能在源库的column中
-                                if (index != null) {
-                                    ps.setObject(index, cv.getValue(), cv.getColumn().getType());
-                                    count++;
-                                }
+                        // 需要先加字段
+                        List<ColumnValue> cvs = incRecord.getColumns();
+                        for (ColumnValue cv : cvs) {
+                            Integer index = getIndex(indexs, cv, true); // 考虑delete的目标库主键，可能在源库的column中
+                            if (index != null) {
+                                ps.setObject(index, cv.getValue(), cv.getColumn().getType());
+                                count++;
                             }
-
-                            // 添加主键
-                            List<ColumnValue> pks = incRecord.getPrimaryKeys();
-                            for (ColumnValue pk : pks) {
-                                Integer index = getIndex(indexs, pk, true);// 考虑delete的目标库主键，可能在源库的column中
-                                if (index != null) {
-                                    ps.setObject(index, pk.getValue(), pk.getColumn().getType());
-                                    count++;
-                                }
-                            }
-
-                            if (count != indexs.size()) {
-                                processMissColumn(incRecord, indexs);
-                            }
-
-                            ps.addBatch();
                         }
 
-                        return ps.executeBatch();
+                        // 添加主键
+                        List<ColumnValue> pks = incRecord.getPrimaryKeys();
+                        for (ColumnValue pk : pks) {
+                            Integer index = getIndex(indexs, pk, true);// 考虑delete的目标库主键，可能在源库的column中
+                            if (index != null) {
+                                ps.setObject(index, pk.getValue(), pk.getColumn().getType());
+                                count++;
+                            }
+                        }
+
+                        if (count != indexs.size()) {
+                            processMissColumn(incRecord, indexs);
+                        }
+
+                        ps.addBatch();
                     }
-                });
-            } catch (Exception e) {
-                // catch the biggest exception,no matter how, rollback it;
-                redoOneByOne = true;
-                e.printStackTrace();
-                // conn.rollback();
-            }
+
+                    return ps.executeBatch();
+                }
+            });
+        } catch (Exception e) {
+            // catch the biggest exception,no matter how, rollback it;
+            redoOneByOne = true;
+            e.printStackTrace();
+            // conn.rollback();
         }
 
         // batch cannot pass the duplicate entry exception,so

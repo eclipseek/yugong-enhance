@@ -72,6 +72,8 @@ public class YuGongUtils {
                     } else {
                         return DbType.MYSQL;
                     }
+                } else if (StringUtils.startsWithIgnoreCase(databaseName, "sundb")) {
+                    return DbType.SUNDB;
                 } else {
                     throw new YuGongException("unknow database type " + databaseName);
                 }

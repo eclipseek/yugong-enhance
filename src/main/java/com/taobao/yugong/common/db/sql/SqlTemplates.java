@@ -8,5 +8,7 @@ public class SqlTemplates {
 
     public static SqlTemplate       COMMON = new SqlTemplate();
     public static MysqlSqlTemplate  MYSQL  = new MysqlSqlTemplate();
+    public static DADBSqlTemplate DADB  = new DADBSqlTemplate();
+    public static SunDBSqlTemplate SUNDB  = new SunDBSqlTemplate();
     public static OracleSqlTemplate ORACLE = new OracleSqlTemplate();
 }
