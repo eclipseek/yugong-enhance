@@ -155,6 +155,11 @@ public abstract class AbstractRecordApplier extends AbstractYuGongLifeCycle impl
         return exist;
     }
 
+    /**
+     * 查询表是否存在
+     * @param context
+     * @return boolean
+     */
     public boolean isTableExist(YuGongContext context) {
         boolean exist = false;
 
@@ -210,10 +215,11 @@ public abstract class AbstractRecordApplier extends AbstractYuGongLifeCycle impl
         }
     };
 
-    /**
-     * 创建表。
-     * @return
-     */
+   /**
+    * 创建表
+    * @param context
+    * @return boolean
+    */
     public boolean createTable(YuGongContext context) {
         DataSource ds = context.getTargetDs();
         Table table = context.getTableMeta();
@@ -383,7 +389,7 @@ public abstract class AbstractRecordApplier extends AbstractYuGongLifeCycle impl
             }
 
             if (type == Types.CHAR || type == Types.VARCHAR) {
-                dest.append(" BINARY");
+                dest.append(" BINARY");     // 字段值默认区分大小写。
             }
 
             dest.append(",");

@@ -426,8 +426,7 @@ public class YuGongController extends AbstractYuGongLifeCycle {
             String mode = config.getString("yugong.run.positioner", "FILE");
             if (StringUtils.equalsIgnoreCase("FILE", mode)) {
                 FileMixedRecordPositioner positioner = new FileMixedRecordPositioner();
-                //positioner.setDataDir(new File("./yugong-enhance/positioner")); // 使用了../相对目录，启动脚本会确保user.dir为bin目录
-                positioner.setDataDir(new File("../yugong-enhance/positioner")); // 使用了../相对目录，启动脚本会确保user.dir为bin目录
+                positioner.setDataDir(new File("../logs/positioner")); // 使用了../相对目录，启动脚本会确保user.dir为bin目录
                 positioner.setDataFileName(tableHolder.table.getSchema() + "_" + tableHolder.table.getName() + ".dat");
                 return positioner;
             } else {
